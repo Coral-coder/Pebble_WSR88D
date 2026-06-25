@@ -7,19 +7,11 @@ roads. Range, map detail, radar color scheme, update frequency, and an on-tap
 animation of the last scans are all configurable through a **Clay** settings
 page.
 
-```
-┌──────────────────────────────┐
-│ 10:42            ▓▓▓░  85%    │   header: time · date · battery
-│ Wed Jun 25                    │
-├──────────────────────────────┤
-│        ____                   │
-│      /      radar over        │   black/white road outline map
-│     |   ▒▒▓  a B/W outline    │   + latest NEXRAD radar overlay
-│      \  ▒▒   map (your loc)   │
-│        ‾‾‾‾                    │
-│      10:40  ·  110mi          │   scan time · current range
-└──────────────────────────────┘
-```
+<img src="store/screenshot-emery.png" width="200" alt="WSR-88D Radar watchface (mockup)">
+
+*(mockup — header shows the large clock, date, battery, and current weather /
+high-low / rain chance; the map is a B/W road outline with the latest NEXRAD
+radar overlaid; the bottom strip shows the scan time and current range.)*
 
 Tap the watch to animate the last *N* radar scans.
 
@@ -78,17 +70,21 @@ Open the watchface settings from the Pebble mobile app:
 
 | Setting | Options | Notes |
 |---|---|---|
-| Location source | Automatic (GPS) / Manual | Manual takes a latitude & longitude |
+| Location source | Automatic (GPS) / Manual | defaults to GPS; manual takes a latitude & longitude |
 | Radar color scheme | 9 RainViewer schemes | Original, Universal Blue, NEXRAD III, … |
 | Smooth radar | on/off | RainViewer smoothing |
 | Distinct snow colors | on/off | |
 | Loop frames | 1–10 | scans animated on tap |
 | Animate loop on tap | on/off | |
 | Map detail | Minimal / Standard / Detailed | edge-detection threshold (major roads → more features) |
-| Range | Wide / Regional / Local | RainViewer zoom 5 / 6 / 7 |
+| Zoom / range | level 4–10 | radar tiles cap at z7; z8–10 upscale the radar to follow the map |
+| Invert map | on/off | white roads on black instead of black-on-white |
 | Map tile URL | template | advanced; any `{z}/{x}/{y}` raster source |
-| Units | Miles / Kilometers | |
+| Units | Miles / Kilometers | also selects °F vs °C for the weather readout |
 | Update frequency | 5 / 10 / 15 / 30 / 60 min | watch-driven refresh interval |
+
+The header also shows **current temperature + condition, today's high/low, and
+chance of rain** (from [Open-Meteo](https://open-meteo.com/), free, no key).
 
 ## Building
 
@@ -131,6 +127,7 @@ artifact. Download it from the run's Artifacts section and side-load it.
 
 - Radar: RainViewer (NOAA / NWS NEXRAD WSR-88D network).
 - Map: © OpenStreetMap contributors, © CARTO (default basemap).
+- Weather: Open-Meteo (CC-BY 4.0).
 - PNG decoding: UPNG.js (MIT), pako (MIT).
 
 ## License

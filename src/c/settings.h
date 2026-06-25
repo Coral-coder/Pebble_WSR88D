@@ -8,6 +8,7 @@ typedef struct {
   uint8_t units;        // 0 = miles, 1 = km
   uint8_t range_idx;    // 0 = wide, 1 = regional, 2 = local
   uint8_t scheme_idx;   // RainViewer color scheme id (for the legend label)
+  uint8_t invert;       // 0 = black ink on white, 1 = inverted (white on black)
 } Settings;
 
 void settings_load(void);

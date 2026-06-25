@@ -36,8 +36,10 @@
 #define DEF_UNITS      0   // 0 = miles, 1 = km
 #define DEF_RANGE      1   // index into range table (0 wide .. 2 local)
 #define DEF_SCHEME     2   // RainViewer "Original" scheme
+#define DEF_INVERT     0   // 0 = black ink on white, 1 = inverted
 
 // App-level hooks implemented in main.c, called by comm.c.
 void app_set_status(const char *text);
 void app_set_scan_label(const char *text);
+void app_set_weather(const char *now, const char *hilo, const char *pop);
 void app_settings_changed(void);

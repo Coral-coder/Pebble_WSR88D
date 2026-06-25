@@ -10,14 +10,24 @@ static Layer *s_header_layer;
 static TextLayer *s_time_layer;
 static TextLayer *s_date_layer;
 static TextLayer *s_batt_layer;
+static TextLayer *s_wx_now_layer;   // current temp + condition
+static TextLayer *s_wx_hilo_layer;  // daily high / low
+static TextLayer *s_wx_pop_layer;   // chance of rain
 static TextLayer *s_bottom_layer;
 
 static char s_time_buf[8];
 static char s_date_buf[20];
 static char s_batt_buf[8];
+static char s_wx_now_buf[20];
+static char s_wx_hilo_buf[20];
+static char s_wx_pop_buf[20];
 static char s_scan_buf[40];     // persistent bottom text (scan time + range)
 static char s_status_buf[40];   // transient status overriding scan text
 static bool s_status_active;
+
+// Battery icon geometry, shared between the header paint and battery layout.
+#define BATT_ICON_W 22
+#define BATT_ICON_H 11
 
 static uint8_t s_batt_pct = 100;
 static bool s_batt_charging;
@@ -49,8 +59,21 @@ void app_set_scan_label(const char *text) {
   refresh_bottom_text();
 }
 
+void app_set_weather(const char *now, const char *hilo, const char *pop) {
+  strncpy(s_wx_now_buf, now, sizeof(s_wx_now_buf) - 1);
+  s_wx_now_buf[sizeof(s_wx_now_buf) - 1] = '\0';
+  strncpy(s_wx_hilo_buf, hilo, sizeof(s_wx_hilo_buf) - 1);
+  s_wx_hilo_buf[sizeof(s_wx_hilo_buf) - 1] = '\0';
+  strncpy(s_wx_pop_buf, pop, sizeof(s_wx_pop_buf) - 1);
+  s_wx_pop_buf[sizeof(s_wx_pop_buf) - 1] = '\0';
+  if (s_wx_now_layer) text_layer_set_text(s_wx_now_layer, s_wx_now_buf);
+  if (s_wx_hilo_layer) text_layer_set_text(s_wx_hilo_layer, s_wx_hilo_buf);
+  if (s_wx_pop_layer) text_layer_set_text(s_wx_pop_layer, s_wx_pop_buf);
+}
+
 void app_settings_changed(void) {
-  // A config change should pull fresh data immediately.
+  // Apply anything the watch renders locally, then pull fresh data.
+  scene_set_invert(settings_get()->invert);
   s_mins_since_refresh = 9999;
   comm_request(REQ_REFRESH);
 }
@@ -62,10 +85,11 @@ static void header_update(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
-  // Battery icon, top-right, to the left of the percentage text.
-  int iw = 22, ih = 11;
-  int ix = b.size.w - 40 - iw + 4;  // sits left of the % text column
-  int iy = 6;
+  // Battery icon, sitting immediately to the left of the "85%" text so the
+  // icon and percentage read as one group in the top-right.
+  int iw = BATT_ICON_W, ih = BATT_ICON_H;
+  int ix = b.size.w - 40 - iw - 2;   // % text occupies the rightmost ~40px
+  int iy = 4;
   graphics_context_set_stroke_color(ctx, GColorWhite);
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_draw_rect(ctx, GRect(ix, iy, iw, ih));
@@ -123,12 +147,26 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
 
 // --- window ---------------------------------------------------------------
 
+// Right-aligned weather row in the top-right column under the battery.
+static TextLayer *make_wx_row(Layer *parent, int x, int y, int w) {
+  TextLayer *tl = text_layer_create(GRect(x, y, w, 16));
+  text_layer_set_background_color(tl, GColorClear);
+  text_layer_set_text_color(tl, GColorWhite);
+  text_layer_set_text_alignment(tl, GTextAlignmentRight);
+  text_layer_set_font(tl, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+  layer_add_child(parent, text_layer_get_layer(tl));
+  return tl;
+}
+
 static void window_load(Window *window) {
   Layer *root = window_get_root_layer(window);
   GRect b = layer_get_bounds(root);
 
-  int header_h = b.size.h >= 200 ? 52 : 40;
-  bool big = header_h >= 52;
+  // Tall header on the big emery screen so the weather column fits under the
+  // battery; a compact header (time/date/battery only) on smaller watches.
+  bool big = b.size.h >= 200;
+  int header_h = big ? 64 : 40;
+  int tw = big ? b.size.w - 90 : b.size.w - 44;  // clock width (room at right)
 
   // Map + radar fills everything below the header.
   s_scene_layer = scene_create_layer(
@@ -140,26 +178,37 @@ static void window_load(Window *window) {
   layer_set_update_proc(s_header_layer, header_update);
   layer_add_child(root, s_header_layer);
 
-  s_time_layer = text_layer_create(GRect(4, big ? 1 : 0, b.size.w - 76,
-                                         big ? 38 : 30));
+  // Clock — large (LECO numbers), ~25% bigger than before on emery.
+  s_time_layer = text_layer_create(GRect(4, big ? 0 : 0, tw, big ? 44 : 30));
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, GColorWhite);
   text_layer_set_font(s_time_layer, fonts_get_system_font(
-      big ? FONT_KEY_LECO_36_BOLD_NUMBERS : FONT_KEY_GOTHIC_28_BOLD));
+      big ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_GOTHIC_28_BOLD));
   layer_add_child(s_header_layer, text_layer_get_layer(s_time_layer));
 
-  s_date_layer = text_layer_create(GRect(4, header_h - 18, b.size.w - 76, 16));
+  s_date_layer = text_layer_create(GRect(4, header_h - (big ? 20 : 18), tw,
+                                         big ? 20 : 16));
   text_layer_set_background_color(s_date_layer, GColorClear);
   text_layer_set_text_color(s_date_layer, GColorWhite);
-  text_layer_set_font(s_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+  text_layer_set_font(s_date_layer, fonts_get_system_font(
+      big ? FONT_KEY_GOTHIC_18 : FONT_KEY_GOTHIC_14));
   layer_add_child(s_header_layer, text_layer_get_layer(s_date_layer));
 
-  s_batt_layer = text_layer_create(GRect(b.size.w - 40, header_h - 18, 38, 16));
+  // Battery percentage (icon drawn by header_update immediately to its left).
+  s_batt_layer = text_layer_create(GRect(b.size.w - 40, 2, 38, 16));
   text_layer_set_background_color(s_batt_layer, GColorClear);
   text_layer_set_text_color(s_batt_layer, GColorWhite);
   text_layer_set_text_alignment(s_batt_layer, GTextAlignmentRight);
   text_layer_set_font(s_batt_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
   layer_add_child(s_header_layer, text_layer_get_layer(s_batt_layer));
+
+  // Weather column under the battery (emery only — no room on small screens).
+  if (big) {
+    int rx = b.size.w - 86, rw = 84;
+    s_wx_now_layer = make_wx_row(s_header_layer, rx, 19, rw);   // temp + sky
+    s_wx_hilo_layer = make_wx_row(s_header_layer, rx, 33, rw);  // high / low
+    s_wx_pop_layer = make_wx_row(s_header_layer, rx, 47, rw);   // chance of rain
+  }
 
   // Bottom status strip (scan time / range / messages) over the map.
   s_bottom_layer = text_layer_create(GRect(0, b.size.h - 18, b.size.w, 18));
@@ -170,6 +219,7 @@ static void window_load(Window *window) {
   layer_add_child(root, text_layer_get_layer(s_bottom_layer));
 
   app_set_status("Locating...");
+  scene_set_invert(settings_get()->invert);
 
   // Seed the UI with the current time and battery state.
   time_t now = time(NULL);
@@ -181,6 +231,9 @@ static void window_unload(Window *window) {
   text_layer_destroy(s_time_layer);
   text_layer_destroy(s_date_layer);
   text_layer_destroy(s_batt_layer);
+  if (s_wx_now_layer) text_layer_destroy(s_wx_now_layer);
+  if (s_wx_hilo_layer) text_layer_destroy(s_wx_hilo_layer);
+  if (s_wx_pop_layer) text_layer_destroy(s_wx_pop_layer);
   text_layer_destroy(s_bottom_layer);
   layer_destroy(s_header_layer);
   scene_destroy();

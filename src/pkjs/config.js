@@ -51,12 +51,18 @@ module.exports = [
         { "label": "Standard", "value": 1 },
         { "label": "Detailed", "value": 2 }
       ] },
-    { "type": "radiogroup", "messageKey": "SET_RANGE", "label": "Range",
-      "defaultValue": 1, "options": [
-        { "label": "Wide (~220 mi)", "value": 0 },
-        { "label": "Regional (~110 mi)", "value": 1 },
-        { "label": "Local (~55 mi)", "value": 2 }
+    { "type": "select", "messageKey": "ZOOM", "label": "Zoom / range",
+      "defaultValue": 6, "options": [
+        { "label": "4 — Multi-state", "value": 4 },
+        { "label": "5 — State (~440 mi)", "value": 5 },
+        { "label": "6 — Regional (~220 mi)", "value": 6 },
+        { "label": "7 — Metro (~110 mi)", "value": 7 },
+        { "label": "8 — City (~55 mi, radar upscaled)", "value": 8 },
+        { "label": "9 — Local (~28 mi, radar upscaled)", "value": 9 },
+        { "label": "10 — Close (~14 mi, radar upscaled)", "value": 10 }
       ] },
+    { "type": "toggle", "messageKey": "INVERT", "label": "Invert map (white on black)",
+      "defaultValue": false },
     { "type": "input", "messageKey": "MAP_URL", "label": "Map tile URL (advanced)",
       "defaultValue": "https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
       "attributes": { "placeholder": "{z}/{x}/{y} template" } }

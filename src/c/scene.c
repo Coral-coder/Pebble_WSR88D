@@ -17,6 +17,7 @@ static uint8_t s_frame_count;    // frames currently loaded
 
 static int8_t s_display_frame;   // frame index being drawn (-1 = none)
 static bool s_animating;
+static bool s_invert;            // black background when true
 static AppTimer *s_anim_timer;
 
 // --- framebuffer pixel helpers -------------------------------------------
@@ -81,8 +82,8 @@ static void apply_rle(GBitmap *fb, const uint8_t *rle, uint32_t len,
 static void scene_update(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
 
-  // White background (paper map look).
-  graphics_context_set_fill_color(ctx, GColorWhite);
+  // Background: white (paper-map look) or black when inverted.
+  graphics_context_set_fill_color(ctx, s_invert ? GColorBlack : GColorWhite);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
   if (!s_base && s_frame_count == 0) {
@@ -175,6 +176,11 @@ void scene_end_batch(void) {
 
 bool scene_has_frames(void) {
   return s_frame_count > 0;
+}
+
+void scene_set_invert(bool invert) {
+  s_invert = invert;
+  if (s_layer) layer_mark_dirty(s_layer);
 }
 
 void scene_get_dims(int *w, int *h) {

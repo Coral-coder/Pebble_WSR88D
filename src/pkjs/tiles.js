@@ -81,40 +81,60 @@ function series(items, iter, done) {
   next(null);
 }
 
-// Blit a decoded tile's RGBA into the viewport RGBA buffer at (ox,oy).
-function blit(dst, W, H, tile, ox, oy) {
-  var tw = tile.w, th = tile.h, src = tile.rgba;
-  for (var y = 0; y < th; y++) {
-    var dy = oy + y;
-    if (dy < 0 || dy >= H) continue;
-    var srow = y * tw * 4;
-    var drow = dy * W * 4;
-    for (var x = 0; x < tw; x++) {
-      var dx = ox + x;
-      if (dx < 0 || dx >= W) continue;
-      var si = srow + x * 4;
-      var di = drow + dx * 4;
-      dst[di] = src[si];
-      dst[di + 1] = src[si + 1];
-      dst[di + 2] = src[si + 2];
-      dst[di + 3] = src[si + 3];
-    }
-  }
-}
+// Build a W x H RGBA viewport centred on lat/lon, displayed at zoom zDisplay,
+// using tiles fetched at zSrc (<= zDisplay). When zSrc < zDisplay the source
+// tiles are nearest-neighbour upscaled by 2^(zDisplay-zSrc) — this lets the
+// radar (RainViewer caps at zoom 7) follow the map past zoom 7. With
+// zSrc == zDisplay it is a straight 1:1 composite. urlFn(tx,ty,z) -> URL.
+// Missing/failed tiles stay transparent so one bad tile can't abort a pull.
+function buildViewport(lat, lon, zDisplay, zSrc, W, H, urlFn, cb) {
+  var f = Math.pow(2, zDisplay - zSrc);        // source px = display px / f
+  var cxd = lonToTileX(lon, zDisplay) * TILE;
+  var cyd = latToTileY(lat, zDisplay) * TILE;
+  var tlxd = cxd - W / 2;                       // display top-left, global px
+  var tlyd = cyd - H / 2;
 
-// Build a W x H RGBA viewport for a layer. urlFn(tx,ty,z) -> tile URL.
-// Missing/failed tiles are left transparent so one bad tile can't abort a pull.
-function buildViewport(lat, lon, z, W, H, urlFn, cb) {
-  var tiles = planTiles(lat, lon, z, W, H);
-  var view = new Uint8Array(W * H * 4);  // zero = transparent
+  var n = Math.pow(2, zSrc);
+  var tx0 = Math.floor(tlxd / f / TILE);
+  var tx1 = Math.floor((tlxd + W - 1) / f / TILE);
+  var ty0 = Math.floor(tlyd / f / TILE);
+  var ty1 = Math.floor((tlyd + H - 1) / f / TILE);
+
+  var need = [];
+  for (var ty = ty0; ty <= ty1; ty++) {
+    for (var tx = tx0; tx <= tx1; tx++) need.push({ tx: tx, ty: ty });
+  }
+
+  var store = {};
   var ok = 0;
-  series(tiles, function (t, next) {
-    fetchPng(urlFn(t.tx, t.ty, z), function (err, tile) {
-      if (!err && tile) { blit(view, W, H, tile, t.ox, t.oy); ok++; }
-      next(null);  // tolerate individual tile failures
+  series(need, function (t, next) {
+    var wx = ((t.tx % n) + n) % n;              // wrap longitude for the URL
+    fetchPng(urlFn(wx, t.ty, zSrc), function (err, tile) {
+      if (!err && tile) { store[t.tx + '_' + t.ty] = tile; ok++; }
+      next(null);
     });
   }, function () {
-    cb(null, view, ok);  // ok = number of tiles successfully fetched
+    var view = new Uint8Array(W * H * 4);       // zero = transparent
+    for (var y = 0; y < H; y++) {
+      var sgy = (tlyd + y) / f;                  // source global y
+      var sty = Math.floor(sgy / TILE);
+      var py = Math.floor(sgy) - sty * TILE;
+      var drow = y * W * 4;
+      for (var x = 0; x < W; x++) {
+        var sgx = (tlxd + x) / f;
+        var stx = Math.floor(sgx / TILE);
+        var px = Math.floor(sgx) - stx * TILE;
+        var tile = store[stx + '_' + sty];
+        if (!tile || px < 0 || px >= tile.w || py < 0 || py >= tile.h) continue;
+        var si = (py * tile.w + px) * 4;
+        var di = drow + x * 4;
+        view[di] = tile.rgba[si];
+        view[di + 1] = tile.rgba[si + 1];
+        view[di + 2] = tile.rgba[si + 2];
+        view[di + 3] = tile.rgba[si + 3];
+      }
+    }
+    cb(null, view, ok);
   });
 }
 

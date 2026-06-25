@@ -20,8 +20,11 @@ function toGColor(r, g, b) {
 // Edge thresholds per map-detail level (0 minimal .. 2 detailed).
 var EDGE_THRESHOLD = [44, 26, 14];
 
-function mapEdgesToRLE(rgba, W, H, detail) {
+// ink: the GColor8 byte for map lines (0xC0 black normally, 0xFF white when
+// the map is inverted so lines show on the black background).
+function mapEdgesToRLE(rgba, W, H, detail, ink) {
   var thr = EDGE_THRESHOLD[detail] !== undefined ? EDGE_THRESHOLD[detail] : 26;
+  var line = ink || 0xC0;
 
   // Grayscale; pixels with no tile data (alpha 0) become white so missing
   // tiles don't generate spurious edges.
@@ -38,7 +41,7 @@ function mapEdgesToRLE(rgba, W, H, detail) {
       var c = gray[idx];
       var gx = x + 1 < W ? Math.abs(gray[idx + 1] - c) : 0;
       var gy = y + 1 < H ? Math.abs(gray[idx + W] - c) : 0;
-      if (gx + gy >= thr) colors[idx] = 0xC0;  // black line
+      if (gx + gy >= thr) colors[idx] = line;  // map line (black or white)
     }
   }
   return encodeRLE(colors);

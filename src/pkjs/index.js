@@ -24,13 +24,11 @@ var IMG_KIND_BASE = 0;
 var IMG_KIND_RADAR = 1;
 
 var RADAR_INDEX_URL = 'https://api.rainviewer.com/public/weather-maps.json';
+var WX_URL = 'https://api.open-meteo.com/v1/forecast';
 var RADAR_ALPHA_MIN = 40;
+var RADAR_MAX_ZOOM = 7;          // RainViewer tile cap
 
-// Range labels (mirrors settings.c) for the bottom status line.
-var RANGE_MI = [220, 110, 55];
-var RANGE_KM = [350, 175, 90];
-
-var dims = { w: 200, h: 176 };   // updated from the watch's SCR_W/SCR_H
+var dims = { w: 200, h: 164 };   // updated from the watch's SCR_W/SCR_H
 var busy = false;
 var pending = false;
 var lastBaseKey = null;          // skip resending the map when unchanged
@@ -56,7 +54,8 @@ function getConfig() {
     frames: Math.max(1, Math.min(10, num(s.SET_FRAMES, 10) | 0)),
     animate: s.SET_ANIMATE === false ? 0 : 1,
     detail: num(s.MAP_DETAIL, 1) | 0,
-    range: num(s.SET_RANGE, 1) | 0,
+    zoom: Math.max(3, Math.min(11, num(s.ZOOM, 6) | 0)),
+    invert: s.INVERT === true ? 1 : 0,
     mapUrl: s.MAP_URL ||
       'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',
     units: num(s.SET_UNITS, 0) | 0,
@@ -71,8 +70,8 @@ function syncSettingsToWatch() {
     SET_ANIMATE: c.animate,
     SET_FRAMES: c.frames,
     SET_UNITS: c.units,
-    SET_RANGE: c.range,
-    SET_SCHEME: c.scheme
+    SET_SCHEME: c.scheme,
+    SET_INVERT: c.invert
   }, function () {});
 }
 
@@ -80,15 +79,60 @@ function syncSettingsToWatch() {
 
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
-function rangeValue(c) {
-  var i = c.range >= 0 && c.range <= 2 ? c.range : 1;
-  return c.units === 1 ? RANGE_KM[i] : RANGE_MI[i];
+// True viewing radius from the zoom level, screen width and latitude.
+function rangeValue(lat, c) {
+  var mpp = 156543.03 * Math.cos(lat * Math.PI / 180) / Math.pow(2, c.zoom);
+  var halfMeters = (dims.w / 2) * mpp;
+  return c.units === 1 ? Math.round(halfMeters / 1000)
+                       : Math.round(halfMeters / 1609.34);
 }
 
-function scanLabel(unixSec, c) {
+function scanLabel(unixSec, lat, c) {
   var d = new Date(unixSec * 1000);
   return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + '  ' +
-         rangeValue(c) + (c.units === 1 ? 'km' : 'mi');
+         rangeValue(lat, c) + (c.units === 1 ? 'km' : 'mi');
+}
+
+// WMO weather code -> short condition word for the watch header.
+function wmoText(code) {
+  if (code === 0) return 'Clear';
+  if (code <= 2) return 'P.Cloudy';
+  if (code === 3) return 'Cloudy';
+  if (code <= 48) return 'Fog';
+  if (code <= 57) return 'Drizzle';
+  if (code <= 67) return 'Rain';
+  if (code <= 77) return 'Snow';
+  if (code <= 82) return 'Showers';
+  if (code <= 86) return 'Snow';
+  return 'Storm';
+}
+
+// Fetch current conditions + today's high/low + rain chance, send to watch.
+function fetchWeather(loc, c) {
+  var unit = c.units === 1 ? 'celsius' : 'fahrenheit';
+  var url = WX_URL + '?latitude=' + loc.lat.toFixed(4) +
+            '&longitude=' + loc.lon.toFixed(4) +
+            '&current=temperature_2m,weather_code' +
+            '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
+            '&temperature_unit=' + unit + '&timezone=auto&forecast_days=1';
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', url, true);
+  xhr.timeout = 15000;
+  xhr.onload = function () {
+    try {
+      var j = JSON.parse(xhr.responseText);
+      var t = Math.round(j.current.temperature_2m);
+      var hi = Math.round(j.daily.temperature_2m_max[0]);
+      var lo = Math.round(j.daily.temperature_2m_min[0]);
+      var pop = j.daily.precipitation_probability_max[0];
+      transport.sendDict({
+        WX_NOW: t + '° ' + wmoText(j.current.weather_code),
+        WX_HILO: 'H' + hi + ' L' + lo,
+        WX_POP: 'Rain ' + (pop == null ? 0 : pop) + '%'
+      }, function () {});
+    } catch (e) { /* leave weather blank on parse failure */ }
+  };
+  xhr.send();
 }
 
 function sendStatus(text) { transport.sendDict({ STATUS: text }, function () {}); }
@@ -136,6 +180,8 @@ function doRefresh(forceBase) {
   getLocation(c, function (err, loc) {
     if (err) { finish('No location'); return; }
 
+    fetchWeather(loc, c);  // fire-and-forget; updates the header when it lands
+
     fetchRadarIndex(function (err2, idx) {
       if (err2 || !idx || !idx.radar || !idx.radar.past ||
           idx.radar.past.length === 0) {
@@ -151,12 +197,14 @@ function doRefresh(forceBase) {
 }
 
 function runRefresh(c, loc, host, frames, forceBase) {
-  var z = 5 + (c.range >= 0 && c.range <= 2 ? c.range : 1);  // 5/6/7
+  var zMap = c.zoom;                              // map zoom (3..11)
+  var zRad = Math.min(zMap, RADAR_MAX_ZOOM);      // radar tiles cap at 7
   var W = dims.w, H = dims.h;
   var nframes = frames.length;
+  var ink = c.invert ? 0xFF : 0xC0;               // white lines when inverted
 
-  var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), z, c.detail, W, H,
-                 c.mapUrl].join('|');
+  var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), zMap, c.detail,
+                 c.invert, W, H, c.mapUrl].join('|');
   var needBase = forceBase || baseKey !== lastBaseKey;
 
   transport.sendDict({ BATCH: 1, NFRAMES: nframes }, function (e) {
@@ -170,7 +218,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
           return host + f.path + '/256/' + zz + '/' + tx + '/' + ty + '/' +
                  c.scheme + '/' + c.smooth + '_' + c.snow + '.png';
         };
-        tiles.buildViewport(loc.lat, loc.lon, z, W, H, urlFn,
+        tiles.buildViewport(loc.lat, loc.lon, zMap, zRad, W, H, urlFn,
           function (err, view) {
             var rle = render.radarToRLE(view, W, H, RADAR_ALPHA_MIN);
             transport.sendImage(IMG_KIND_RADAR, item.i, rle, function () {
@@ -179,7 +227,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
           });
       }, function () {
         transport.sendDict({ BATCH: 0,
-          STATUS: scanLabel(frames[nframes - 1].time, c) },
+          STATUS: scanLabel(frames[nframes - 1].time, loc.lat, c) },
           function () { finish(null); });
       });
     }
@@ -189,10 +237,10 @@ function runRefresh(c, loc, host, frames, forceBase) {
     var mapFn = function (tx, ty, zz) {
       return c.mapUrl.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
     };
-    tiles.buildViewport(loc.lat, loc.lon, z, W, H, mapFn,
+    tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
       function (err, view, ok) {
         if (!ok) { finish('Map offline'); return; }
-        var rle = render.mapEdgesToRLE(view, W, H, c.detail);
+        var rle = render.mapEdgesToRLE(view, W, H, c.detail, ink);
         lastBaseKey = baseKey;
         transport.sendImage(IMG_KIND_BASE, 0, rle, function () {
           sendFrames();

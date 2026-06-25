@@ -19,6 +19,10 @@ void scene_end_batch(void);  // settle on newest frame and redraw
 
 bool scene_has_frames(void);
 
+// Invert the base layer (white background -> black). The map ink color is
+// chosen on the phone, so the background fill is all the watch must flip.
+void scene_set_invert(bool invert);
+
 // Tap handler: play the loop once (oldest -> newest). No-op if disabled or
 // only one frame is loaded.
 void scene_play_loop(void);

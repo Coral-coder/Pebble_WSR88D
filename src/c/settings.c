@@ -20,6 +20,7 @@ void settings_load(void) {
     .units = DEF_UNITS,
     .range_idx = DEF_RANGE,
     .scheme_idx = DEF_SCHEME,
+    .invert = DEF_INVERT,
   };
   if (persist_exists(SETTINGS_KEY)) {
     persist_read_data(SETTINGS_KEY, &s_settings, sizeof(s_settings));

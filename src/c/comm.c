@@ -41,6 +41,9 @@ static void handle_settings(DictionaryIterator *it) {
   if ((t = dict_find(it, MESSAGE_KEY_SET_SCHEME))) {
     s->scheme_idx = (uint8_t)t->value->int32; changed = true;
   }
+  if ((t = dict_find(it, MESSAGE_KEY_SET_INVERT))) {
+    s->invert = (uint8_t)t->value->int32; changed = true;
+  }
 
   if (changed) {
     if (s->frames < 1) s->frames = 1;
@@ -114,8 +117,20 @@ static void inbox_received(DictionaryIterator *it, void *context) {
       dict_find(it, MESSAGE_KEY_SET_FRAMES) ||
       dict_find(it, MESSAGE_KEY_SET_UNITS) ||
       dict_find(it, MESSAGE_KEY_SET_RANGE) ||
-      dict_find(it, MESSAGE_KEY_SET_SCHEME)) {
+      dict_find(it, MESSAGE_KEY_SET_SCHEME) ||
+      dict_find(it, MESSAGE_KEY_SET_INVERT)) {
     handle_settings(it);
+    return;
+  }
+
+  // Weather strings arrive together in their own message.
+  Tuple *t_wx = dict_find(it, MESSAGE_KEY_WX_NOW);
+  if (t_wx) {
+    Tuple *t_hl = dict_find(it, MESSAGE_KEY_WX_HILO);
+    Tuple *t_pp = dict_find(it, MESSAGE_KEY_WX_POP);
+    app_set_weather(t_wx->value->cstring,
+                    t_hl ? t_hl->value->cstring : "",
+                    t_pp ? t_pp->value->cstring : "");
     return;
   }
 
