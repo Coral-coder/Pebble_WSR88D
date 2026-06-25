@@ -20,6 +20,10 @@ function toGColor(r, g, b) {
 // Edge thresholds per map-detail level (0 minimal .. 2 detailed).
 var EDGE_THRESHOLD = [44, 26, 14];
 
+// Thicken map lines by this radius so 1px edges become easy to see on-watch
+// (radius 1 -> ~3px lines).
+var LINE_RADIUS = 1;
+
 // ink: the GColor8 byte for map lines (0xC0 black normally, 0xFF white when
 // the map is inverted so lines show on the black background).
 function mapEdgesToRLE(rgba, W, H, detail, ink) {
@@ -34,14 +38,31 @@ function mapEdgesToRLE(rgba, W, H, detail, ink) {
     gray[p] = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
   }
 
-  var colors = new Uint8Array(W * H);  // 0 = transparent
+  // 1) Detect 1px edges.
+  var edge = new Uint8Array(W * H);
   for (var y = 0; y < H; y++) {
     for (var x = 0; x < W; x++) {
       var idx = y * W + x;
       var c = gray[idx];
       var gx = x + 1 < W ? Math.abs(gray[idx + 1] - c) : 0;
       var gy = y + 1 < H ? Math.abs(gray[idx + W] - c) : 0;
-      if (gx + gy >= thr) colors[idx] = line;  // map line (black or white)
+      if (gx + gy >= thr) edge[idx] = 1;
+    }
+  }
+
+  // 2) Dilate edges by LINE_RADIUS so lines are thick enough to read on-watch.
+  var colors = new Uint8Array(W * H);  // 0 = transparent
+  var r = LINE_RADIUS;
+  for (var ey = 0; ey < H; ey++) {
+    for (var ex = 0; ex < W; ex++) {
+      if (!edge[ey * W + ex]) continue;
+      var y0 = ey - r < 0 ? 0 : ey - r;
+      var y1 = ey + r >= H ? H - 1 : ey + r;
+      var x0 = ex - r < 0 ? 0 : ex - r;
+      var x1 = ex + r >= W ? W - 1 : ex + r;
+      for (var yy = y0; yy <= y1; yy++) {
+        for (var xx = x0; xx <= x1; xx++) colors[yy * W + xx] = line;
+      }
     }
   }
   return encodeRLE(colors);
