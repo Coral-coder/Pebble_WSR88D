@@ -119,13 +119,13 @@ function scanLabel(unixSec, lat, c) {
 // WMO weather code -> short condition word for the watch header.
 function wmoText(code) {
   if (code === 0) return 'Clear';
-  if (code <= 2) return 'P.Cloudy';
-  if (code === 3) return 'Cloudy';
+  if (code <= 2) return 'PCldy';
+  if (code === 3) return 'Cloud';
   if (code <= 48) return 'Fog';
-  if (code <= 57) return 'Drizzle';
+  if (code <= 57) return 'Drzl';
   if (code <= 67) return 'Rain';
   if (code <= 77) return 'Snow';
-  if (code <= 82) return 'Showers';
+  if (code <= 82) return 'Shwrs';
   if (code <= 86) return 'Snow';
   return 'Storm';
 }

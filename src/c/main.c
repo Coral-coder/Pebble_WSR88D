@@ -166,7 +166,9 @@ static void window_load(Window *window) {
   // battery; a compact header (time/date/battery only) on smaller watches.
   bool big = b.size.h >= 200;
   int header_h = big ? 64 : 40;
-  int tw = big ? b.size.w - 90 : b.size.w - 44;  // clock width (room at right)
+  // Clock width is sized so the WIDEST time (e.g. "23:58", all wide digits)
+  // fits without truncation while leaving a narrow weather column at right.
+  int tw = big ? b.size.w - 74 : b.size.w - 44;
 
   // Map + radar fills everything below the header.
   s_scene_layer = scene_create_layer(
@@ -183,7 +185,7 @@ static void window_load(Window *window) {
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, GColorWhite);
   text_layer_set_font(s_time_layer, fonts_get_system_font(
-      big ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_GOTHIC_28_BOLD));
+      big ? FONT_KEY_LECO_36_BOLD_NUMBERS : FONT_KEY_GOTHIC_28_BOLD));
   layer_add_child(s_header_layer, text_layer_get_layer(s_time_layer));
 
   s_date_layer = text_layer_create(GRect(4, header_h - (big ? 20 : 18), tw,
@@ -204,7 +206,7 @@ static void window_load(Window *window) {
 
   // Weather column under the battery (emery only — no room on small screens).
   if (big) {
-    int rx = b.size.w - 86, rw = 84;
+    int rx = b.size.w - 68, rw = 66;
     s_wx_now_layer = make_wx_row(s_header_layer, rx, 19, rw);   // temp + sky
     s_wx_hilo_layer = make_wx_row(s_header_layer, rx, 33, rw);  // high / low
     s_wx_pop_layer = make_wx_row(s_header_layer, rx, 47, rw);   // chance of rain
