@@ -10,9 +10,9 @@ module.exports = [
 
   { "type": "heading", "defaultValue": "Location", "size": 4 },
   { "type": "radiogroup", "messageKey": "LOC_MODE", "label": "Location source",
-    "defaultValue": 0, "options": [
-      { "label": "Automatic (GPS)", "value": 0 },
-      { "label": "Manual coordinates", "value": 1 }
+    "defaultValue": "0", "options": [
+      { "label": "Automatic (GPS)", "value": "0" },
+      { "label": "Manual coordinates", "value": "1" }
     ] },
   { "type": "input", "messageKey": "LOC_LAT", "label": "Latitude (manual)",
     "attributes": { "placeholder": "e.g. 35.22", "type": "text" } },
@@ -43,10 +43,10 @@ module.exports = [
 
   { "type": "heading", "defaultValue": "Map", "size": 4 },
   { "type": "radiogroup", "messageKey": "MAP_DETAIL", "label": "Map detail",
-    "defaultValue": 1, "options": [
-      { "label": "Minimal (major roads)", "value": 0 },
-      { "label": "Standard", "value": 1 },
-      { "label": "Detailed", "value": 2 }
+    "defaultValue": "1", "options": [
+      { "label": "Minimal (major roads)", "value": "0" },
+      { "label": "Standard", "value": "1" },
+      { "label": "Detailed", "value": "2" }
     ] },
   { "type": "select", "messageKey": "ZOOM", "label": "Zoom / range",
     "defaultValue": 6, "options": [
@@ -66,9 +66,9 @@ module.exports = [
 
   { "type": "heading", "defaultValue": "Display", "size": 4 },
   { "type": "radiogroup", "messageKey": "SET_UNITS", "label": "Units",
-    "defaultValue": 0, "options": [
-      { "label": "Miles", "value": 0 },
-      { "label": "Kilometers", "value": 1 }
+    "defaultValue": "0", "options": [
+      { "label": "Miles", "value": "0" },
+      { "label": "Kilometers", "value": "1" }
     ] },
   { "type": "select", "messageKey": "SET_UPDATE_MIN", "label": "Update frequency",
     "defaultValue": 10, "options": [
