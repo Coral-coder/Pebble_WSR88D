@@ -44,6 +44,8 @@ function getConfig() {
   var s = {};
   try { s = JSON.parse(localStorage.getItem('clay-settings')) || {}; }
   catch (e) { s = {}; }
+  var url = (typeof s.MAP_URL === 'string' && s.MAP_URL) ? s.MAP_URL :
+    'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png';
   return {
     locMode: num(s.LOC_MODE, 0) | 0,
     lat: num(s.LOC_LAT, NaN),
@@ -55,12 +57,33 @@ function getConfig() {
     animate: s.SET_ANIMATE === false ? 0 : 1,
     detail: num(s.MAP_DETAIL, 1) | 0,
     zoom: Math.max(3, Math.min(11, num(s.ZOOM, 6) | 0)),
-    invert: s.INVERT === true ? 1 : 0,
-    mapUrl: s.MAP_URL ||
-      'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',
+    invert: s.INVERT === true || s.INVERT === 'true' || num(s.INVERT, 0) === 1
+      ? 1 : 0,
+    mapUrl: url,
     units: num(s.SET_UNITS, 0) | 0,
     updateMin: num(s.SET_UPDATE_MIN, 10) | 0
   };
+}
+
+// Repair stored settings that were written in Clay's raw (unflattened) form,
+// e.g. { LOC_MODE: { value: "0" } }. Such objects crash Clay's component
+// manipulators on the next config open, so unwrap them to scalars.
+function sanitizeStoredSettings() {
+  var s;
+  try { s = JSON.parse(localStorage.getItem('clay-settings')); }
+  catch (e) { return; }
+  if (!s || typeof s !== 'object') return;
+  var changed = false;
+  Object.keys(s).forEach(function (k) {
+    if (s[k] && typeof s[k] === 'object' && 'value' in s[k]) {
+      s[k] = s[k].value;
+      changed = true;
+    }
+  });
+  if (changed) {
+    try { localStorage.setItem('clay-settings', JSON.stringify(s)); }
+    catch (e) {}
+  }
 }
 
 function syncSettingsToWatch() {
@@ -252,6 +275,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
 // --- Pebble events --------------------------------------------------------
 
 Pebble.addEventListener('ready', function () {
+  sanitizeStoredSettings();
   syncSettingsToWatch();
   doRefresh(true);
 });
@@ -268,16 +292,16 @@ Pebble.addEventListener('appmessage', function (e) {
 });
 
 Pebble.addEventListener('showConfiguration', function () {
+  sanitizeStoredSettings();       // repair any legacy bad storage before prefill
   Pebble.openURL(clay.generateUrl());
 });
 
 Pebble.addEventListener('webviewclosed', function (e) {
   if (!e || !e.response) return;
-  // convert=false returns raw values (numbers/booleans/strings), which is the
-  // format both getConfig() and Clay's own prefill (generateUrl) expect.
-  var dict = clay.getSettings(e.response, false);
-  try { localStorage.setItem('clay-settings', JSON.stringify(dict)); }
-  catch (err) {}
+  // clay.getSettings() flattens {value:x} wrappers to scalars and writes them
+  // to localStorage itself — do NOT overwrite that (raw form crashes Clay's
+  // manipulators on the next open and breaks getConfig()).
+  clay.getSettings(e.response);
   syncSettingsToWatch();
   lastBaseKey = null;             // settings may change the map; force resend
   doRefresh(true);
