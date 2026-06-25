@@ -145,7 +145,7 @@ static void window_load(Window *window) {
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, GColorWhite);
   text_layer_set_font(s_time_layer, fonts_get_system_font(
-      big ? FONT_KEY_GOTHIC_36_BOLD : FONT_KEY_GOTHIC_28_BOLD));
+      big ? FONT_KEY_LECO_36_BOLD_NUMBERS : FONT_KEY_GOTHIC_28_BOLD));
   layer_add_child(s_header_layer, text_layer_get_layer(s_time_layer));
 
   s_date_layer = text_layer_create(GRect(4, header_h - 18, b.size.w - 76, 16));
