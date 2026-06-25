@@ -1,0 +1,53 @@
+name: Build Pebble app
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install emulator runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl1.2debian libfdt1 libpixman-1-0 || true
+
+      - name: Install pebble-tool
+        run: pip install --upgrade pebble-tool
+
+      - name: Disable SDK analytics prompt
+        run: |
+          mkdir -p "$HOME/.pebble-sdk"
+          touch "$HOME/.pebble-sdk/NO_TRACKING"
+
+      - name: Install Pebble SDK (toolchain + platforms)
+        run: pebble sdk install latest
+
+      - name: Build .pbw
+        run: pebble build
+
+      - name: Show build artifacts
+        run: ls -la build/
+
+      - name: Upload .pbw
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsr88d-radar
+          path: build/*.pbw
+          if-no-files-found: error
