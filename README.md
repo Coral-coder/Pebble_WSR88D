@@ -78,7 +78,7 @@ Open the watchface settings from the Pebble mobile app:
 | Animate loop on tap | on/off | |
 | Map detail | Minimal / Standard / Detailed | edge-detection threshold (major roads → more features) |
 | Zoom / range | level 4–10 | radar tiles cap at z7; z8–10 upscale the radar to follow the map |
-| Invert map | on/off | white roads on black instead of black-on-white |
+| Map style | Light / Light HC / Dark / Dark HC | real basemap; HC = stark high-contrast 2-tone |
 | Map tile URL | template | advanced; any `{z}/{x}/{y}` raster source |
 | Units | Miles / Kilometers | also selects °F vs °C for the weather readout |
 | Update frequency | 5 / 10 / 15 / 30 / 60 min | watch-driven refresh interval |

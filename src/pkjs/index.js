@@ -11,7 +11,8 @@
 
 var Clay = require('pebble-clay');
 var clayConfig = require('./config.js');
-var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
+var clayPreview = require('./preview.js');
+var clay = new Clay(clayConfig, clayPreview, { autoHandleEvents: false });
 
 var tiles = require('./tiles.js');
 var render = require('./render.js');
@@ -58,8 +59,11 @@ function getConfig() {
     animate: s.SET_ANIMATE === false ? 0 : 1,
     detail: num(s.MAP_DETAIL, 1) | 0,
     zoom: Math.max(3, Math.min(11, num(s.ZOOM, 6) | 0)),
-    invert: s.INVERT === true || s.INVERT === 'true' || num(s.INVERT, 0) === 1
-      ? 1 : 0,
+    // Map style: 0 light, 1 light high-contrast, 2 dark, 3 dark high-contrast.
+    style: num(s.MAP_STYLE, 0) | 0,
+    invert: num(s.MAP_STYLE, 0) >= 2 ? 1 : 0,
+    contrast: (num(s.MAP_STYLE, 0) | 0) === 1 ||
+              (num(s.MAP_STYLE, 0) | 0) === 3 ? 1 : 0,
     mapUrlCustom: custom,
     units: num(s.SET_UNITS, 0) | 0,
     updateMin: num(s.SET_UPDATE_MIN, 10) | 0
@@ -242,7 +246,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
   var mapBg = c.invert ? 0xC0 : 0xFF;             // black (dark) / white (light)
 
   var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), zMap, c.detail,
-                 c.invert, W, H, mapUrl].join('|');
+                 c.style, W, H, mapUrl].join('|');
   var needBase = forceBase || baseKey !== lastBaseKey;
 
   transport.sendDict({ BATCH: 1, NFRAMES: nframes }, function (e) {
@@ -278,7 +282,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
     tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
       function (err, view, ok) {
         if (!ok) { finish('Map offline'); return; }
-        var rle = render.mapToRLE(view, W, H, mapBg);
+        var rle = render.mapToRLE(view, W, H, mapBg, c.contrast);
         lastBaseKey = baseKey;
         transport.sendImage(IMG_KIND_BASE, 0, rle, function () {
           sendFrames();

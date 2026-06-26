@@ -120,11 +120,23 @@ function mapEdgesToRLE(rgba, W, H, detail, ink) {
 // Render an actual basemap tile (light or dark style) by quantizing every
 // pixel to a Pebble GColor8 — a real filled map, not line art. Missing tiles
 // (alpha 0) fall back to the background color.
-function mapToRLE(rgba, W, H, bg) {
+//   bg: 0xFF for light, 0xC0 for dark.
+//   contrast: when true, snap to a stark 2-tone map (features in the opposite
+//   color of bg) for maximum legibility.
+function mapToRLE(rgba, W, H, bg, contrast) {
   var colors = new Uint8Array(W * H);
+  var ink = bg === 0xFF ? 0xC0 : 0xFF;   // feature color opposite the background
+  var light = bg === 0xFF;
   for (var p = 0, i = 0; p < W * H; p++, i += 4) {
     if (rgba[i + 3] < 128) { colors[p] = bg; continue; }
-    colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);
+    if (contrast) {
+      var lum = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
+      // On a light map, darker pixels (roads/water/coast) become ink; on a
+      // dark map, lighter pixels become ink.
+      colors[p] = (light ? lum < 150 : lum > 120) ? ink : bg;
+    } else {
+      colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);
+    }
   }
   return encodeRLE(colors);
 }

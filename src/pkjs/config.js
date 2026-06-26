@@ -57,8 +57,13 @@ module.exports = [
       { "label": "9 — Local (~28 mi, radar upscaled)", "value": 9 },
       { "label": "10 — Close (~14 mi, radar upscaled)", "value": 10 }
     ] },
-  { "type": "toggle", "messageKey": "INVERT", "label": "Dark mode map",
-    "defaultValue": false },
+  { "type": "select", "messageKey": "MAP_STYLE", "label": "Map style",
+    "defaultValue": 0, "options": [
+      { "label": "Light", "value": 0 },
+      { "label": "Light — high contrast", "value": 1 },
+      { "label": "Dark", "value": 2 },
+      { "label": "Dark — high contrast", "value": 3 }
+    ] },
   { "type": "input", "messageKey": "MAP_URL", "label": "Custom map tile URL (advanced)",
     "defaultValue": "",
     "attributes": { "placeholder": "blank = built-in light/dark map" } },
