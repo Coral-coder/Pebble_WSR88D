@@ -32,13 +32,28 @@ function highwayRegex(z) {
   return 'motorway|trunk|primary|secondary|tertiary';
 }
 
-// Is this natural=water way a real body of water (not a pond/stream/river)?
-function isBigWater(el) {
-  var g = el.geometry;
-  if (!g || g.length < 18) return false;          // small/simple -> skip
-  var w = (el.tags && el.tags.water) || '';
-  if (/pond|stream|ditch|canal|drain|wastewater|reflecting|river/.test(w)) return false;
-  return true;
+var WATER_MIN_NODES = 20;   // boundaries this complex are real water bodies
+
+// Collect fillable water polygons (node arrays) from natural=water ways and
+// multipolygon relations, keeping only large ones (drops small ponds).
+function waterPolys(els) {
+  var out = [];
+  for (var e = 0; e < els.length; e++) {
+    var el = els[e], tags = el.tags || {};
+    if (tags.natural !== 'water') continue;
+    if (el.type === 'way' && el.geometry && el.geometry.length >= WATER_MIN_NODES) {
+      out.push(el.geometry);
+    } else if (el.type === 'relation' && el.members) {
+      for (var m = 0; m < el.members.length; m++) {
+        var mm = el.members[m];
+        if (mm.type === 'way' && (mm.role === 'outer' || !mm.role) &&
+            mm.geometry && mm.geometry.length >= WATER_MIN_NODES) {
+          out.push(mm.geometry);
+        }
+      }
+    }
+  }
+  return out;
 }
 
 // Scanline-fill a polygon (array of [x,y]) into the color buffer.
@@ -94,13 +109,14 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
   var north = yToLat(tly, z), south = yToLat(tly + H, z);
   var bb = south + ',' + west + ',' + north + ',' + east;
 
-  // Major roads + coastline + water polygons. Small ponds/streams/rivers are
-  // filtered out at render time (by subtag + size) so only real bodies of
-  // water show.
-  var q = '[out:json][timeout:20];(' +
+  // Major roads + coastline + water (ways AND multipolygon relations — big
+  // lagoons/rivers are often relations). Small ponds are filtered by size at
+  // render time so only real bodies of water show.
+  var q = '[out:json][timeout:25];(' +
     'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
     'way["natural"="coastline"](' + bb + ');' +
     'way["natural"="water"](' + bb + ');' +
+    'relation["natural"="water"](' + bb + ');' +
     ');out geom;';
 
   var xhr = new XMLHttpRequest();
@@ -115,11 +131,10 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
       var water = ink === 0xFF ? 0xD5 : 0xEA;  // gray water fill
       var e, n, g, tags, pts;
 
-      // Pass 1: fill large water bodies.
-      for (e = 0; e < els.length; e++) {
-        tags = els[e].tags || {};
-        if (tags.natural !== 'water' || !isBigWater(els[e])) continue;
-        g = els[e].geometry; pts = [];
+      // Pass 1: fill large water bodies (ways + relation outers).
+      var polys = waterPolys(els);
+      for (e = 0; e < polys.length; e++) {
+        g = polys[e]; pts = [];
         for (n = 0; n < g.length; n++) {
           pts.push([lonToX(g[n].lon, z) - tlx, latToY(g[n].lat, z) - tly]);
         }

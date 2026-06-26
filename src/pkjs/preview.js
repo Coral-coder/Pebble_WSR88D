@@ -111,21 +111,31 @@ module.exports = function (minified) {
 
   function drawVector(mctx, c, lc, z, tok, done) {
     var ink = c.style === 5 ? '#ffffff' : '#000000';
-    function bigWater(el) {
-      var g = el.geometry; if (!g || g.length < 18) return false;
-      var w = (el.tags && el.tags.water) || '';
-      return !/pond|stream|ditch|canal|drain|wastewater|reflecting|river/.test(w);
+    function wpolys(els) {
+      var out = [];
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i], tg = el.tags || {};
+        if (tg.natural !== 'water') continue;
+        if (el.type === 'way' && el.geometry && el.geometry.length >= 20) out.push(el.geometry);
+        else if (el.type === 'relation' && el.members) {
+          for (var m = 0; m < el.members.length; m++) {
+            var mm = el.members[m];
+            if (mm.type === 'way' && (mm.role === 'outer' || !mm.role) &&
+                mm.geometry && mm.geometry.length >= 20) out.push(mm.geometry);
+          }
+        }
+      }
+      return out;
     }
     function render2() {
       if (tok !== seq) return;
       var cx = lonToX(lc.lon, z), cy = latToY(lc.lat, z), tlx = cx - Wd / 2, tly = cy - MAPH / 2;
       var els = roads.els || [], e, n, g, tags;
-      // water fills
+      // water fills (ways + relation outers)
       mctx.fillStyle = c.style === 5 ? '#555555' : '#c8c8c8';
-      for (e = 0; e < els.length; e++) {
-        tags = els[e].tags || {};
-        if (tags.natural !== 'water' || !bigWater(els[e])) continue;
-        g = els[e].geometry; mctx.beginPath();
+      var polys = wpolys(els);
+      for (e = 0; e < polys.length; e++) {
+        g = polys[e]; mctx.beginPath();
         for (n = 0; n < g.length; n++) {
           var wx = lonToX(g[n].lon, z) - tlx, wy = latToY(g[n].lat, z) - tly;
           if (n === 0) mctx.moveTo(wx, wy); else mctx.lineTo(wx, wy);
@@ -154,10 +164,11 @@ module.exports = function (minified) {
     function xToLon(px) { return px / TILE / Math.pow(2, z) * 360 - 180; }
     function yToLat(px) { var nn = Math.PI - 2 * Math.PI * (px / TILE) / Math.pow(2, z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(nn) - Math.exp(-nn))); }
     var bb = yToLat(tly + MAPH) + ',' + xToLon(tlx) + ',' + yToLat(tly) + ',' + xToLon(tlx + Wd);
-    var q = '[out:json][timeout:20];(' +
+    var q = '[out:json][timeout:25];(' +
       'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
       'way["natural"="coastline"](' + bb + ');' +
       'way["natural"="water"](' + bb + ');' +
+      'relation["natural"="water"](' + bb + ');' +
       ');out geom;';
     getJSON('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q), function (err, data) {
       if (tok !== seq) return;
