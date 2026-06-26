@@ -256,6 +256,7 @@ function doRefresh(forceBase) {
 }
 
 function runRefresh(c, loc, host, frames, forceBase) {
+  pv.lat = loc.lat; pv.lon = loc.lon;            // for the live settings preview
   var zMap = c.zoom;                              // map zoom (3..11)
   var zRad = Math.min(zMap, RADAR_MAX_ZOOM);      // radar tiles cap at 7
   var W = dims.w, H = dims.h;
@@ -367,9 +368,7 @@ Pebble.addEventListener('showConfiguration', function () {
   try {
     clay.meta = clay.meta || {};
     clay.meta.userData = {
-      w: pv.w, h: pv.h, wx: pv.wx, scan: pv.scan,
-      base: (pv.base && pv.base.length < 60000) ? pv.base : null,
-      radar: (pv.radar && pv.radar.length < 30000) ? pv.radar : null
+      w: pv.w, h: pv.h, wx: pv.wx, scan: pv.scan, lat: pv.lat, lon: pv.lon
     };
   } catch (e) {}
   Pebble.openURL(clay.generateUrl());
