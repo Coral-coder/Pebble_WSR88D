@@ -289,6 +289,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
 
   function buildBase(done) {
     if (isVector) {
+      sendStatus('Loading map...');
       var ink = c.style === 5 ? 0xFF : 0xC0;
       vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink,
         function (err, rle) {

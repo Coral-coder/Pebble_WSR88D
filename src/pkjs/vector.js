@@ -26,9 +26,9 @@ function yToLat(px, z) {
 // Which road classes to include at a given zoom — fewer when zoomed out so the
 // view stays glanceable and the query stays small.
 function highwayRegex(z) {
-  if (z <= 6) return 'motorway|trunk';
-  if (z <= 8) return 'motorway|trunk|primary';
-  if (z <= 10) return 'motorway|trunk|primary|secondary';
+  if (z <= 7) return 'motorway|trunk';
+  if (z <= 9) return 'motorway|trunk|primary';
+  if (z <= 11) return 'motorway|trunk|primary|secondary';
   return 'motorway|trunk|primary|secondary|tertiary';
 }
 
@@ -61,11 +61,11 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
   var north = yToLat(tly, z), south = yToLat(tly + H, z);
   var bb = south + ',' + west + ',' + north + ',' + east;
 
-  var q = '[out:json][timeout:25];(' +
+  // Major roads + the main coastline only. Small water bodies (natural=water)
+  // and rivers are intentionally excluded: they add clutter and slow the query.
+  var q = '[out:json][timeout:20];(' +
     'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
     'way["natural"="coastline"](' + bb + ');' +
-    'way["natural"="water"](' + bb + ');' +
-    'way["waterway"="river"](' + bb + ');' +
     ');out geom;';
 
   var xhr = new XMLHttpRequest();

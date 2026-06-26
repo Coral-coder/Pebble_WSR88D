@@ -56,9 +56,9 @@ module.exports = function (minified) {
     return { lat: 39.5, lon: -98.35 };
   }
   function highwayRegex(z) {
-    if (z <= 6) return 'motorway|trunk';
-    if (z <= 8) return 'motorway|trunk|primary';
-    if (z <= 10) return 'motorway|trunk|primary|secondary';
+    if (z <= 7) return 'motorway|trunk';
+    if (z <= 9) return 'motorway|trunk|primary';
+    if (z <= 11) return 'motorway|trunk|primary|secondary';
     return 'motorway|trunk|primary|secondary|tertiary';
   }
 
@@ -135,10 +135,10 @@ module.exports = function (minified) {
     function xToLon(px) { return px / TILE / Math.pow(2, z) * 360 - 180; }
     function yToLat(px) { var nn = Math.PI - 2 * Math.PI * (px / TILE) / Math.pow(2, z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(nn) - Math.exp(-nn))); }
     var bb = yToLat(tly + MAPH) + ',' + xToLon(tlx) + ',' + yToLat(tly) + ',' + xToLon(tlx + Wd);
-    var q = '[out:json][timeout:25];(' +
+    var q = '[out:json][timeout:20];(' +
       'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
-      'way["natural"="coastline"](' + bb + ');way["natural"="water"](' + bb + ');' +
-      'way["waterway"="river"](' + bb + '););out geom;';
+      'way["natural"="coastline"](' + bb + ');' +
+      ');out geom;';
     getJSON('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q), function (err, data) {
       if (tok !== seq) return;
       roads.key = key; roads.els = (err || !data) ? [] : (data.elements || []);
