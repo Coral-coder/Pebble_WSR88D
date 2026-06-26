@@ -183,5 +183,6 @@ module.exports = {
   mapToRLE: mapToRLE,
   mapEdgesToRLE: mapEdgesToRLE,
   radarToRLE: radarToRLE,
+  encodeRLE: encodeRLE,
   TRANSPARENT: TRANSPARENT
 };

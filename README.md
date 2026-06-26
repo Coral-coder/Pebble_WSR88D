@@ -29,12 +29,13 @@ JS with a bundled pure-JS PNG decoder, and the watch is a thin compositor:
    index (free, no API key), and figures out which slippy `z/x/y` tiles cover
    the view. Map tiles and radar tiles share the **same** tile grid, so the
    layers line up pixel-for-pixel.
-3. The phone fetches the map tiles ([CARTO](https://carto.com/basemaps)
-   Voyager for light mode, Dark Matter for dark mode) and the radar tiles,
-   decodes them with
-   [UPNG.js](https://github.com/photopea/UPNG.js)/[pako](https://github.com/nodeca/pako),
-   and **quantizes** both the basemap and the radar to Pebble's 64-color
-   space so the map renders as a real light/dark map with the radar on top.
+3. For the default map the phone queries **OpenStreetMap** (Overpass API, no
+   key) for major roads + coastline + water in view and draws them as **bold
+   vector lines** — a clean, glanceable, high-contrast map with no labels or
+   clutter, rendered in the same projection as the radar so they align. (Other
+   styles fetch raster tiles — CARTO Voyager, or Stamen Toner with a free
+   Stadia key — decoded via UPNG/pako and quantized to Pebble's 64 colors.)
+   The radar tiles are quantized and overlaid on top.
 4. Each layer is **run-length encoded** (mostly transparent → tiny) and
    streamed to the watch in acked AppMessage chunks.
 5. The watch paints the base map once, overlays the current radar frame, and
@@ -78,7 +79,7 @@ Open the watchface settings from the Pebble mobile app:
 | Animate loop on tap | on/off | |
 | Map detail | Minimal / Standard / Detailed | edge-detection threshold (major roads → more features) |
 | Zoom / range | level 4–10 | radar tiles cap at z7; z8–10 upscale the radar to follow the map |
-| Map style | Light / Light HC / Dark / Dark HC | real basemap; HC = stark high-contrast 2-tone |
+| Map style | Roads&coastline (clean) / dark / Stamen Toner / Full color / Custom | default draws bold major roads + coastline from OpenStreetMap vector data (no key); Toner needs a free Stadia key |
 | Map tile URL | template | advanced; any `{z}/{x}/{y}` raster source |
 | Units | Miles / Kilometers | also selects °F vs °C for the weather readout |
 | Update frequency | 5 / 10 / 15 / 30 / 60 min | watch-driven refresh interval |

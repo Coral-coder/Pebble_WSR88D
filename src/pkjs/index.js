@@ -16,6 +16,7 @@ var clay = new Clay(clayConfig, clayPreview, { autoHandleEvents: false });
 
 var tiles = require('./tiles.js');
 var render = require('./render.js');
+var vector = require('./vector.js');
 var transport = require('./transport.js');
 
 // Must match src/c/wsr88d.h
@@ -70,8 +71,7 @@ function getConfig() {
     // Map style (see mapPlan): 1 light HC (default), 3 dark HC, 4 Stamen Toner
     // streets, 0 full color, 2 dark grayscale, 9 custom URL.
     style: num(s.MAP_STYLE, 1) | 0,
-    invert: (num(s.MAP_STYLE, 1) | 0) === 2 ||
-            (num(s.MAP_STYLE, 1) | 0) === 3 ? 1 : 0,
+    invert: [2, 3, 5].indexOf(num(s.MAP_STYLE, 1) | 0) >= 0 ? 1 : 0,
     stadiaKey: typeof s.STADIA_KEY === 'string' ? s.STADIA_KEY.replace(/\s/g, '') : '',
     mapUrlCustom: (typeof s.MAP_URL === 'string' && s.MAP_URL.indexOf('{z}') >= 0)
       ? s.MAP_URL : '',
@@ -266,13 +266,48 @@ function runRefresh(c, loc, host, frames, forceBase) {
   var zRad = Math.min(zMap, RADAR_MAX_ZOOM);      // radar tiles cap at 7
   var W = dims.w, H = dims.h;
   var nframes = frames.length;
-  var plan = mapPlan(c);
-  var mapUrl = plan.url;
+  var isVector = (c.style === 1 || c.style === 5);  // bold roads+coastline
+  var plan = isVector ? { url: 'vector', mode: '' } : mapPlan(c);
   if (plan.note) sendStatus(plan.note);
 
   var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), zMap, c.detail,
-                 c.style, W, H, mapUrl].join('|');
+                 c.style, W, H, plan.url].join('|');
   var needBase = forceBase || baseKey !== lastBaseKey;
+
+  function stashAndSendBase(rle, done) {
+    pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
+    lastBaseKey = baseKey;
+    transport.sendImage(IMG_KIND_BASE, 0, rle, function () { done(true); });
+  }
+
+  // Build the base map via raster tiles (Voyager/Toner/custom) at `mode`.
+  function buildRaster(url, mode, done) {
+    var mapFn = function (tx, ty, zz) {
+      return url.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
+    };
+    tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
+      function (err, view, ok) {
+        if (!ok) { done(false); return; }
+        stashAndSendBase(render.mapToRLE(view, W, H, mode), done);
+      });
+  }
+
+  function buildBase(done) {
+    if (isVector) {
+      var ink = c.style === 5 ? 0xFF : 0xC0;
+      vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink,
+        function (err, rle) {
+          if (err || !rle) {        // Overpass unavailable -> raster fallback
+            sendStatus('Roads unavailable');
+            buildRaster(mapPlan({ style: 1, detail: c.detail }).url, 'hc', done);
+            return;
+          }
+          stashAndSendBase(rle, done);
+        });
+    } else {
+      buildRaster(plan.url, plan.mode, done);
+    }
+  }
 
   transport.sendDict({ BATCH: 1, NFRAMES: nframes }, function (e) {
     if (e) { finish('Link error'); return; }
@@ -305,19 +340,10 @@ function runRefresh(c, loc, host, frames, forceBase) {
 
     if (!needBase) { sendFrames(); return; }
 
-    var mapFn = function (tx, ty, zz) {
-      return mapUrl.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
-    };
-    tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
-      function (err, view, ok) {
-        if (!ok) { finish('Map offline'); return; }
-        var rle = render.mapToRLE(view, W, H, plan.mode);
-        pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
-        lastBaseKey = baseKey;
-        transport.sendImage(IMG_KIND_BASE, 0, rle, function () {
-          sendFrames();
-        });
-      });
+    buildBase(function (ok) {
+      if (!ok) { finish('Map offline'); return; }
+      sendFrames();
+    });
   });
 }
 

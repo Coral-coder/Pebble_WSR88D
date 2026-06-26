@@ -59,10 +59,9 @@ module.exports = [
     ] },
   { "type": "select", "messageKey": "MAP_STYLE", "label": "Map style",
     "defaultValue": 1, "options": [
-      { "label": "High contrast (land/water)", "value": 1 },
+      { "label": "Roads & coastline (clean)", "value": 1 },
+      { "label": "Roads & coastline — dark", "value": 5 },
       { "label": "Streets — Stamen Toner (needs key)", "value": 4 },
-      { "label": "Dark — high contrast", "value": 3 },
-      { "label": "Dark — grayscale", "value": 2 },
       { "label": "Full color", "value": 0 },
       { "label": "Custom tile URL", "value": 9 }
     ] },
