@@ -1,12 +1,12 @@
 /* Clay customFn: renders a PIXEL-EXACT preview of the watchface in the
  * settings page by decoding the exact RLE buffers the phone last sent to the
- * watch (stashed in localStorage as 'wsr-preview'). The map + radar are the
- * literal GColor pixels the watch draws; the header/footer text is overlaid to
- * match the watch layout.
+ * watch, handed in via Clay userData (clayConfig.meta.userData). The map +
+ * radar are the literal GColor pixels the watch draws; the header/footer text
+ * is overlaid to match the watch layout.
  *
  * Runs inside the config webview (serialized via toSource): self-contained,
- * uses only `document` + localStorage + the ClayConfig instance. Everything is
- * wrapped in try/catch so it can never break the settings page.
+ * uses only `document` + the ClayConfig instance. Everything is wrapped in
+ * try/catch so it can never break the settings page.
  *
  * Note: this reflects the currently-applied settings (the last render). After
  * changing a setting, Save and reopen settings to see it update.
@@ -37,9 +37,8 @@ module.exports = function (minified) {
   function drawExact(canvas) {
     var ctx = canvas.getContext('2d');
     try {
-      var raw = localStorage.getItem('wsr-preview');
-      if (!raw) { placeholder(ctx); return; }
-      var pv = JSON.parse(raw);
+      var pv = (clayConfig.meta && clayConfig.meta.userData) || null;
+      if (!pv || !pv.base) { placeholder(ctx); return; }
       var W = pv.w, H = pv.h;
       var CW = canvas.width, CH = canvas.height;
       var HDR = CH - H; if (HDR < 0) HDR = 0;

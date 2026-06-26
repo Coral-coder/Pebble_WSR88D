@@ -35,16 +35,10 @@ var busy = false;
 var pending = false;
 var lastBaseKey = null;          // skip resending the map when unchanged
 
-// Exact-preview state: the actual pixel buffers (RLE) last sent to the watch,
-// stashed so the settings page can render a pixel-accurate preview.
+// Exact-preview state: the actual pixel buffers (RLE) last sent to the watch.
+// Passed to the settings page via Clay userData (the config webview has its own
+// localStorage, so it can't read ours — it must come through the config URL).
 var pv = { w: 200, h: 164, base: null, radar: null, wx: ['', '', ''], scan: '' };
-
-function savePreview() {
-  try {
-    if (!pv.base) return;
-    localStorage.setItem('wsr-preview', JSON.stringify(pv));
-  } catch (e) {}
-}
 
 // --- settings -------------------------------------------------------------
 
@@ -332,7 +326,6 @@ function runRefresh(c, loc, host, frames, forceBase) {
           });
       }, function () {
         pv.scan = scanLabel(frames[nframes - 1].time, loc.lat, c);
-        savePreview();
         transport.sendDict({ BATCH: 0, STATUS: pv.scan },
           function () { finish(null); });
       });
@@ -368,6 +361,17 @@ Pebble.addEventListener('appmessage', function (e) {
 
 Pebble.addEventListener('showConfiguration', function () {
   sanitizeStoredSettings();       // repair any legacy bad storage before prefill
+  // Hand the exact last-rendered pixel buffers to the config page so it can
+  // draw a pixel-accurate preview (the config webview can't read our storage).
+  // Buffers ride in the config URL, so cap their size; the vector map is small.
+  try {
+    clay.meta = clay.meta || {};
+    clay.meta.userData = {
+      w: pv.w, h: pv.h, wx: pv.wx, scan: pv.scan,
+      base: (pv.base && pv.base.length < 60000) ? pv.base : null,
+      radar: (pv.radar && pv.radar.length < 30000) ? pv.radar : null
+    };
+  } catch (e) {}
   Pebble.openURL(clay.generateUrl());
 });
 
