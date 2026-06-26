@@ -117,6 +117,11 @@ function mapEdgesToRLE(rgba, W, H, detail, ink) {
   return encodeRLE(colors);
 }
 
+// High-contrast luminance cut: pixels darker than this (water, parks, urban,
+// coastlines, boundaries) become the feature color; lighter land stays
+// background. Tuned so water (~lum 196 in Voyager) reads as a feature.
+var HC_CUT = 205;
+
 // Neutral-gray GColor8 from a 0..255 value (2 bits/channel).
 function toGray(v) {
   var q = (v + 42) / 85 | 0; if (q < 0) q = 0; if (q > 3) q = 3;
@@ -136,8 +141,8 @@ function mapToRLE(rgba, W, H, dark, contrast) {
     if (rgba[i + 3] < 128) { colors[p] = bg; continue; }
     var lum = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
     if (contrast) {
-      // Dark features (roads/water/coast/labels) are the map content.
-      var feat = lum < 150;
+      // Darker pixels (water/parks/urban/coast/boundaries) are the map content.
+      var feat = lum < HC_CUT;
       colors[p] = feat ? (dark ? 0xFF : 0xC0) : (dark ? 0xC0 : 0xFF);
     } else if (dark) {
       colors[p] = toGray(255 - lum);          // inverted grayscale night map

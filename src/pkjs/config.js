@@ -58,11 +58,11 @@ module.exports = [
       { "label": "10 — Close (~14 mi, radar upscaled)", "value": 10 }
     ] },
   { "type": "select", "messageKey": "MAP_STYLE", "label": "Map style",
-    "defaultValue": 0, "options": [
-      { "label": "Light", "value": 0 },
+    "defaultValue": 1, "options": [
       { "label": "Light — high contrast", "value": 1 },
-      { "label": "Dark", "value": 2 },
-      { "label": "Dark — high contrast", "value": 3 }
+      { "label": "Dark — high contrast", "value": 3 },
+      { "label": "Light — full color", "value": 0 },
+      { "label": "Dark — grayscale", "value": 2 }
     ] },
 
   { "type": "heading", "defaultValue": "Display", "size": 4 },

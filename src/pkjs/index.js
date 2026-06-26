@@ -68,10 +68,11 @@ function getConfig() {
     detail: num(s.MAP_DETAIL, 1) | 0,
     zoom: Math.max(3, Math.min(11, num(s.ZOOM, 6) | 0)),
     // Map style: 0 light, 1 light high-contrast, 2 dark, 3 dark high-contrast.
-    style: num(s.MAP_STYLE, 0) | 0,
-    invert: num(s.MAP_STYLE, 0) >= 2 ? 1 : 0,
-    contrast: (num(s.MAP_STYLE, 0) | 0) === 1 ||
-              (num(s.MAP_STYLE, 0) | 0) === 3 ? 1 : 0,
+    // High-contrast (1) is the default — it reads best on the watch.
+    style: num(s.MAP_STYLE, 1) | 0,
+    invert: num(s.MAP_STYLE, 1) >= 2 ? 1 : 0,
+    contrast: (num(s.MAP_STYLE, 1) | 0) === 1 ||
+              (num(s.MAP_STYLE, 1) | 0) === 3 ? 1 : 0,
     units: num(s.SET_UNITS, 0) | 0,
     updateMin: num(s.SET_UPDATE_MIN, 10) | 0
   };
