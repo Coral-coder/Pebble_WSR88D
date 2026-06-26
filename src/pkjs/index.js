@@ -34,6 +34,17 @@ var busy = false;
 var pending = false;
 var lastBaseKey = null;          // skip resending the map when unchanged
 
+// Exact-preview state: the actual pixel buffers (RLE) last sent to the watch,
+// stashed so the settings page can render a pixel-accurate preview.
+var pv = { w: 200, h: 164, base: null, radar: null, wx: ['', '', ''], scan: '' };
+
+function savePreview() {
+  try {
+    if (!pv.base) return;
+    localStorage.setItem('wsr-preview', JSON.stringify(pv));
+  } catch (e) {}
+}
+
 // --- settings -------------------------------------------------------------
 
 function num(v, dflt) {
@@ -45,9 +56,6 @@ function getConfig() {
   var s = {};
   try { s = JSON.parse(localStorage.getItem('clay-settings')) || {}; }
   catch (e) { s = {}; }
-  // A custom tile URL is only honored if it actually looks like a template.
-  var custom = (typeof s.MAP_URL === 'string' && s.MAP_URL.indexOf('{z}') >= 0)
-    ? s.MAP_URL : '';
   return {
     locMode: num(s.LOC_MODE, 0) | 0,
     lat: num(s.LOC_LAT, NaN),
@@ -64,7 +72,6 @@ function getConfig() {
     invert: num(s.MAP_STYLE, 0) >= 2 ? 1 : 0,
     contrast: (num(s.MAP_STYLE, 0) | 0) === 1 ||
               (num(s.MAP_STYLE, 0) | 0) === 3 ? 1 : 0,
-    mapUrlCustom: custom,
     units: num(s.SET_UNITS, 0) | 0,
     updateMin: num(s.SET_UPDATE_MIN, 10) | 0
   };
@@ -73,7 +80,6 @@ function getConfig() {
 // Pick a real CARTO basemap: dark mode -> Dark Matter, light mode -> Voyager.
 // Map detail "Detailed" (2) keeps labels; otherwise a cleaner no-labels style.
 function mapStyleUrl(c) {
-  if (c.mapUrlCustom) return c.mapUrlCustom;
   var labels = c.detail >= 2;
   if (c.invert) {
     return 'https://a.basemaps.cartocdn.com/dark_' +
@@ -166,10 +172,11 @@ function fetchWeather(loc, c) {
       var hi = Math.round(j.daily.temperature_2m_max[0]);
       var lo = Math.round(j.daily.temperature_2m_min[0]);
       var pop = j.daily.precipitation_probability_max[0];
+      pv.wx = [t + '° ' + wmoText(j.current.weather_code),
+               'H' + hi + ' L' + lo,
+               'Rain ' + (pop == null ? 0 : pop) + '%'];
       transport.sendDict({
-        WX_NOW: t + '° ' + wmoText(j.current.weather_code),
-        WX_HILO: 'H' + hi + ' L' + lo,
-        WX_POP: 'Rain ' + (pop == null ? 0 : pop) + '%'
+        WX_NOW: pv.wx[0], WX_HILO: pv.wx[1], WX_POP: pv.wx[2]
       }, function () {});
     } catch (e) { /* leave weather blank on parse failure */ }
   };
@@ -263,13 +270,17 @@ function runRefresh(c, loc, host, frames, forceBase) {
         tiles.buildViewport(loc.lat, loc.lon, zMap, zRad, W, H, urlFn,
           function (err, view) {
             var rle = render.radarToRLE(view, W, H, RADAR_ALPHA_MIN);
+            if (item.i === nframes - 1) {     // newest frame -> preview
+              pv.radar = Array.prototype.slice.call(rle);
+            }
             transport.sendImage(IMG_KIND_RADAR, item.i, rle, function () {
               next(null);
             });
           });
       }, function () {
-        transport.sendDict({ BATCH: 0,
-          STATUS: scanLabel(frames[nframes - 1].time, loc.lat, c) },
+        pv.scan = scanLabel(frames[nframes - 1].time, loc.lat, c);
+        savePreview();
+        transport.sendDict({ BATCH: 0, STATUS: pv.scan },
           function () { finish(null); });
       });
     }
@@ -283,6 +294,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
       function (err, view, ok) {
         if (!ok) { finish('Map offline'); return; }
         var rle = render.mapToRLE(view, W, H, mapBg, c.contrast);
+        pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
         lastBaseKey = baseKey;
         transport.sendImage(IMG_KIND_BASE, 0, rle, function () {
           sendFrames();

@@ -64,9 +64,6 @@ module.exports = [
       { "label": "Dark", "value": 2 },
       { "label": "Dark — high contrast", "value": 3 }
     ] },
-  { "type": "input", "messageKey": "MAP_URL", "label": "Custom map tile URL (advanced)",
-    "defaultValue": "",
-    "attributes": { "placeholder": "blank = built-in light/dark map" } },
 
   { "type": "heading", "defaultValue": "Display", "size": 4 },
   { "type": "radiogroup", "messageKey": "SET_UNITS", "label": "Units",
