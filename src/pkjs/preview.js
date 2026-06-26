@@ -111,17 +111,36 @@ module.exports = function (minified) {
 
   function drawVector(mctx, c, lc, z, tok, done) {
     var ink = c.style === 5 ? '#ffffff' : '#000000';
+    function bigWater(el) {
+      var g = el.geometry; if (!g || g.length < 18) return false;
+      var w = (el.tags && el.tags.water) || '';
+      return !/pond|stream|ditch|canal|drain|wastewater|reflecting|river/.test(w);
+    }
     function render2() {
       if (tok !== seq) return;
-      mctx.strokeStyle = ink; mctx.lineCap = 'round';
       var cx = lonToX(lc.lon, z), cy = latToY(lc.lat, z), tlx = cx - Wd / 2, tly = cy - MAPH / 2;
-      var els = roads.els || [];
-      for (var e = 0; e < els.length; e++) {
-        var g = els[e].geometry; if (!g || g.length < 2) continue;
-        var tags = els[e].tags || {};
-        mctx.lineWidth = (tags.highway === 'motorway' || tags.highway === 'trunk') ? 3 : 2;
+      var els = roads.els || [], e, n, g, tags;
+      // water fills
+      mctx.fillStyle = c.style === 5 ? '#555555' : '#c8c8c8';
+      for (e = 0; e < els.length; e++) {
+        tags = els[e].tags || {};
+        if (tags.natural !== 'water' || !bigWater(els[e])) continue;
+        g = els[e].geometry; mctx.beginPath();
+        for (n = 0; n < g.length; n++) {
+          var wx = lonToX(g[n].lon, z) - tlx, wy = latToY(g[n].lat, z) - tly;
+          if (n === 0) mctx.moveTo(wx, wy); else mctx.lineTo(wx, wy);
+        }
+        mctx.closePath(); mctx.fill();
+      }
+      // roads + coastline, thin
+      mctx.strokeStyle = ink; mctx.lineCap = 'round';
+      for (e = 0; e < els.length; e++) {
+        tags = els[e].tags || {};
+        if (tags.natural === 'water') continue;
+        g = els[e].geometry; if (!g || g.length < 2) continue;
+        mctx.lineWidth = (tags.highway === 'motorway' || tags.highway === 'trunk') ? 2 : 1;
         mctx.beginPath();
-        for (var n = 0; n < g.length; n++) {
+        for (n = 0; n < g.length; n++) {
           var sx = lonToX(g[n].lon, z) - tlx, sy = latToY(g[n].lat, z) - tly;
           if (n === 0) mctx.moveTo(sx, sy); else mctx.lineTo(sx, sy);
         }
@@ -138,6 +157,7 @@ module.exports = function (minified) {
     var q = '[out:json][timeout:20];(' +
       'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
       'way["natural"="coastline"](' + bb + ');' +
+      'way["natural"="water"](' + bb + ');' +
       ');out geom;';
     getJSON('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q), function (err, data) {
       if (tok !== seq) return;

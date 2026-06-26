@@ -32,6 +32,39 @@ function highwayRegex(z) {
   return 'motorway|trunk|primary|secondary|tertiary';
 }
 
+// Is this natural=water way a real body of water (not a pond/stream/river)?
+function isBigWater(el) {
+  var g = el.geometry;
+  if (!g || g.length < 18) return false;          // small/simple -> skip
+  var w = (el.tags && el.tags.water) || '';
+  if (/pond|stream|ditch|canal|drain|wastewater|reflecting|river/.test(w)) return false;
+  return true;
+}
+
+// Scanline-fill a polygon (array of [x,y]) into the color buffer.
+function fillPoly(buf, W, H, pts, col) {
+  var minY = H, maxY = 0, i, j;
+  for (i = 0; i < pts.length; i++) {
+    if (pts[i][1] < minY) minY = pts[i][1];
+    if (pts[i][1] > maxY) maxY = pts[i][1];
+  }
+  minY = Math.max(0, Math.floor(minY)); maxY = Math.min(H - 1, Math.ceil(maxY));
+  for (var y = minY; y <= maxY; y++) {
+    var xs = [];
+    for (i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      var yi = pts[i][1], yj = pts[j][1];
+      if ((yi > y) !== (yj > y)) {
+        xs.push(pts[i][0] + (y - yi) / (yj - yi) * (pts[j][0] - pts[i][0]));
+      }
+    }
+    xs.sort(function (a, b) { return a - b; });
+    for (var k = 0; k + 1 < xs.length; k += 2) {
+      var x0 = Math.max(0, Math.ceil(xs[k])), x1 = Math.min(W - 1, Math.floor(xs[k + 1]));
+      for (var x = x0; x <= x1; x++) buf[y * W + x] = col;
+    }
+  }
+}
+
 // Draw a thick line segment into the W*H color buffer (t = pixel thickness).
 function drawSeg(buf, W, H, x0, y0, x1, y1, col, t) {
   var dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
@@ -61,11 +94,13 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
   var north = yToLat(tly, z), south = yToLat(tly + H, z);
   var bb = south + ',' + west + ',' + north + ',' + east;
 
-  // Major roads + the main coastline only. Small water bodies (natural=water)
-  // and rivers are intentionally excluded: they add clutter and slow the query.
+  // Major roads + coastline + water polygons. Small ponds/streams/rivers are
+  // filtered out at render time (by subtag + size) so only real bodies of
+  // water show.
   var q = '[out:json][timeout:20];(' +
     'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
     'way["natural"="coastline"](' + bb + ');' +
+    'way["natural"="water"](' + bb + ');' +
     ');out geom;';
 
   var xhr = new XMLHttpRequest();
@@ -77,17 +112,31 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
       var data = JSON.parse(xhr.responseText);
       var els = data.elements || [];
       var buf = new Uint8Array(W * H);  // 0 = transparent
-      for (var e = 0; e < els.length; e++) {
-        var g = els[e].geometry;
-        if (!g || g.length < 2) continue;
-        var tags = els[e].tags || {};
-        var t = (tags.highway === 'motorway' || tags.highway === 'trunk') ? 3 : 2;
-        var prevX = null, prevY = null;
-        for (var n = 0; n < g.length; n++) {
+      var water = ink === 0xFF ? 0xD5 : 0xEA;  // gray water fill
+      var e, n, g, tags, pts;
+
+      // Pass 1: fill large water bodies.
+      for (e = 0; e < els.length; e++) {
+        tags = els[e].tags || {};
+        if (tags.natural !== 'water' || !isBigWater(els[e])) continue;
+        g = els[e].geometry; pts = [];
+        for (n = 0; n < g.length; n++) {
+          pts.push([lonToX(g[n].lon, z) - tlx, latToY(g[n].lat, z) - tly]);
+        }
+        fillPoly(buf, W, H, pts, water);
+      }
+      // Pass 2: roads + coastline as thin lines on top.
+      for (e = 0; e < els.length; e++) {
+        tags = els[e].tags || {};
+        if (tags.natural === 'water') continue;
+        g = els[e].geometry; if (!g || g.length < 2) continue;
+        var t = (tags.highway === 'motorway' || tags.highway === 'trunk') ? 2 : 1;
+        var px = null, py = null;
+        for (n = 0; n < g.length; n++) {
           var sx = Math.round(lonToX(g[n].lon, z) - tlx);
           var sy = Math.round(latToY(g[n].lat, z) - tly);
-          if (prevX !== null) drawSeg(buf, W, H, prevX, prevY, sx, sy, ink, t);
-          prevX = sx; prevY = sy;
+          if (px !== null) drawSeg(buf, W, H, px, py, sx, sy, ink, t);
+          px = sx; py = sy;
         }
       }
       cb(null, render.encodeRLE(buf));
