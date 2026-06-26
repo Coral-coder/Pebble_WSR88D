@@ -2,8 +2,8 @@
 
 A watchface for the **Pebble Time 2** (`emery`, 200×228 color) that shows the
 **time, date, and watch battery** over a live **weather-surveillance radar**
-loop, painted on a **black-and-white outline map** of your location with major
-roads. Range, map detail, radar color scheme, update frequency, and an on-tap
+loop, painted on a **light or dark map** of your location. Range, map style,
+radar color scheme, update frequency, and an on-tap
 animation of the last scans are all configurable through a **Clay** settings
 page.
 
@@ -30,11 +30,11 @@ JS with a bundled pure-JS PNG decoder, and the watch is a thin compositor:
    the view. Map tiles and radar tiles share the **same** tile grid, so the
    layers line up pixel-for-pixel.
 3. The phone fetches the map tiles ([CARTO](https://carto.com/basemaps)
-   basemaps by default) and the radar tiles, decodes them with
+   Voyager for light mode, Dark Matter for dark mode) and the radar tiles,
+   decodes them with
    [UPNG.js](https://github.com/photopea/UPNG.js)/[pako](https://github.com/nodeca/pako),
-   runs **edge detection** on the map to produce black line-art (any tile style
-   works — detail just moves the edge threshold), and **quantizes** the radar
-   to Pebble's 64-color space.
+   and **quantizes** both the basemap and the radar to Pebble's 64-color
+   space so the map renders as a real light/dark map with the radar on top.
 4. Each layer is **run-length encoded** (mostly transparent → tiny) and
    streamed to the watch in acked AppMessage chunks.
 5. The watch paints the base map once, overlays the current radar frame, and

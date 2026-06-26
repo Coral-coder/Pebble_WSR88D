@@ -6,7 +6,7 @@
 module.exports = [
   { "type": "heading", "defaultValue": "WSR-88D Radar" },
   { "type": "text",
-    "defaultValue": "Latest NWS weather-surveillance radar over a black &amp; white outline map for your location." },
+    "defaultValue": "Latest NWS weather-surveillance radar over a light or dark map for your location." },
 
   { "type": "heading", "defaultValue": "Location", "size": 4 },
   { "type": "radiogroup", "messageKey": "LOC_MODE", "label": "Location source",
@@ -42,11 +42,10 @@ module.exports = [
     "defaultValue": true },
 
   { "type": "heading", "defaultValue": "Map", "size": 4 },
-  { "type": "radiogroup", "messageKey": "MAP_DETAIL", "label": "Map detail",
+  { "type": "radiogroup", "messageKey": "MAP_DETAIL", "label": "Map labels",
     "defaultValue": "1", "options": [
-      { "label": "Minimal (major roads)", "value": "0" },
-      { "label": "Standard", "value": "1" },
-      { "label": "Detailed", "value": "2" }
+      { "label": "No labels (clean)", "value": "1" },
+      { "label": "With place labels", "value": "2" }
     ] },
   { "type": "select", "messageKey": "ZOOM", "label": "Zoom / range",
     "defaultValue": 6, "options": [
@@ -58,11 +57,11 @@ module.exports = [
       { "label": "9 — Local (~28 mi, radar upscaled)", "value": 9 },
       { "label": "10 — Close (~14 mi, radar upscaled)", "value": 10 }
     ] },
-  { "type": "toggle", "messageKey": "INVERT", "label": "Invert map (white on black)",
+  { "type": "toggle", "messageKey": "INVERT", "label": "Dark mode map",
     "defaultValue": false },
-  { "type": "input", "messageKey": "MAP_URL", "label": "Map tile URL (advanced)",
-    "defaultValue": "https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png",
-    "attributes": { "placeholder": "{z}/{x}/{y} template" } },
+  { "type": "input", "messageKey": "MAP_URL", "label": "Custom map tile URL (advanced)",
+    "defaultValue": "",
+    "attributes": { "placeholder": "blank = built-in light/dark map" } },
 
   { "type": "heading", "defaultValue": "Display", "size": 4 },
   { "type": "radiogroup", "messageKey": "SET_UNITS", "label": "Units",

@@ -44,8 +44,9 @@ function getConfig() {
   var s = {};
   try { s = JSON.parse(localStorage.getItem('clay-settings')) || {}; }
   catch (e) { s = {}; }
-  var url = (typeof s.MAP_URL === 'string' && s.MAP_URL) ? s.MAP_URL :
-    'https://a.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png';
+  // A custom tile URL is only honored if it actually looks like a template.
+  var custom = (typeof s.MAP_URL === 'string' && s.MAP_URL.indexOf('{z}') >= 0)
+    ? s.MAP_URL : '';
   return {
     locMode: num(s.LOC_MODE, 0) | 0,
     lat: num(s.LOC_LAT, NaN),
@@ -59,10 +60,23 @@ function getConfig() {
     zoom: Math.max(3, Math.min(11, num(s.ZOOM, 6) | 0)),
     invert: s.INVERT === true || s.INVERT === 'true' || num(s.INVERT, 0) === 1
       ? 1 : 0,
-    mapUrl: url,
+    mapUrlCustom: custom,
     units: num(s.SET_UNITS, 0) | 0,
     updateMin: num(s.SET_UPDATE_MIN, 10) | 0
   };
+}
+
+// Pick a real CARTO basemap: dark mode -> Dark Matter, light mode -> Voyager.
+// Map detail "Detailed" (2) keeps labels; otherwise a cleaner no-labels style.
+function mapStyleUrl(c) {
+  if (c.mapUrlCustom) return c.mapUrlCustom;
+  var labels = c.detail >= 2;
+  if (c.invert) {
+    return 'https://a.basemaps.cartocdn.com/dark_' +
+           (labels ? 'all' : 'nolabels') + '/{z}/{x}/{y}.png';
+  }
+  return 'https://a.basemaps.cartocdn.com/rastertiles/voyager' +
+         (labels ? '' : '_nolabels') + '/{z}/{x}/{y}.png';
 }
 
 // Repair stored settings that were written in Clay's raw (unflattened) form,
@@ -224,10 +238,11 @@ function runRefresh(c, loc, host, frames, forceBase) {
   var zRad = Math.min(zMap, RADAR_MAX_ZOOM);      // radar tiles cap at 7
   var W = dims.w, H = dims.h;
   var nframes = frames.length;
-  var ink = c.invert ? 0xFF : 0xC0;               // white lines when inverted
+  var mapUrl = mapStyleUrl(c);
+  var mapBg = c.invert ? 0xC0 : 0xFF;             // black (dark) / white (light)
 
   var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), zMap, c.detail,
-                 c.invert, W, H, c.mapUrl].join('|');
+                 c.invert, W, H, mapUrl].join('|');
   var needBase = forceBase || baseKey !== lastBaseKey;
 
   transport.sendDict({ BATCH: 1, NFRAMES: nframes }, function (e) {
@@ -258,12 +273,12 @@ function runRefresh(c, loc, host, frames, forceBase) {
     if (!needBase) { sendFrames(); return; }
 
     var mapFn = function (tx, ty, zz) {
-      return c.mapUrl.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
+      return mapUrl.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
     };
     tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
       function (err, view, ok) {
         if (!ok) { finish('Map offline'); return; }
-        var rle = render.mapEdgesToRLE(view, W, H, c.detail, ink);
+        var rle = render.mapToRLE(view, W, H, mapBg);
         lastBaseKey = baseKey;
         transport.sendImage(IMG_KIND_BASE, 0, rle, function () {
           sendFrames();

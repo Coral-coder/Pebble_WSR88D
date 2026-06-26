@@ -117,6 +117,18 @@ function mapEdgesToRLE(rgba, W, H, detail, ink) {
   return encodeRLE(colors);
 }
 
+// Render an actual basemap tile (light or dark style) by quantizing every
+// pixel to a Pebble GColor8 — a real filled map, not line art. Missing tiles
+// (alpha 0) fall back to the background color.
+function mapToRLE(rgba, W, H, bg) {
+  var colors = new Uint8Array(W * H);
+  for (var p = 0, i = 0; p < W * H; p++, i += 4) {
+    if (rgba[i + 3] < 128) { colors[p] = bg; continue; }
+    colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);
+  }
+  return encodeRLE(colors);
+}
+
 function radarToRLE(rgba, W, H, alphaMin) {
   var colors = new Uint8Array(W * H);
   for (var p = 0, i = 0; p < W * H; p++, i += 4) {
@@ -142,6 +154,7 @@ function encodeRLE(colors) {
 }
 
 module.exports = {
+  mapToRLE: mapToRLE,
   mapEdgesToRLE: mapEdgesToRLE,
   radarToRLE: radarToRLE,
   TRANSPARENT: TRANSPARENT
