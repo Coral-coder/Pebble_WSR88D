@@ -42,11 +42,9 @@ module.exports = [
     "defaultValue": true },
 
   { "type": "heading", "defaultValue": "Map", "size": 4 },
-  { "type": "radiogroup", "messageKey": "MAP_DETAIL", "label": "Map labels",
-    "defaultValue": "1", "options": [
-      { "label": "No labels (clean)", "value": "1" },
-      { "label": "With place labels", "value": "2" }
-    ] },
+  { "type": "slider", "messageKey": "DETAIL", "label": "Map detail",
+    "description": "Lower = only major roads &amp; big water; higher = more roads &amp; smaller water bodies.",
+    "defaultValue": 3, "min": 1, "max": 5, "step": 1 },
   { "type": "select", "messageKey": "ZOOM", "label": "Zoom / range",
     "defaultValue": 6, "options": [
       { "label": "4 — Multi-state", "value": 4 },

@@ -42,7 +42,7 @@ module.exports = function (minified) {
       units: intg('SET_UNITS', 0),
       smooth: boolg('RADAR_SMOOTH', true) ? 1 : 0,
       snow: boolg('RADAR_SNOW', true) ? 1 : 0,
-      detail: intg('MAP_DETAIL', 1),
+      detail: Math.max(1, Math.min(5, intg('DETAIL', 3))),
       key: (gi('STADIA_KEY') || '').replace(/\s/g, ''),
       murl: gi('MAP_URL') || '',
       locMode: intg('LOC_MODE', 0),
@@ -55,12 +55,15 @@ module.exports = function (minified) {
     if (isFinite(u.lat) && isFinite(u.lon)) return { lat: u.lat, lon: u.lon };
     return { lat: 39.5, lon: -98.35 };
   }
-  function highwayRegex(z) {
-    if (z <= 7) return 'motorway|trunk';
-    if (z <= 9) return 'motorway|trunk|primary';
-    if (z <= 11) return 'motorway|trunk|primary|secondary';
-    return 'motorway|trunk|primary|secondary|tertiary';
+  function highwayRegex(detail) {
+    var cc = ['motorway', 'trunk'];
+    if (detail >= 2) cc.push('primary');
+    if (detail >= 3) cc.push('secondary');
+    if (detail >= 4) cc.push('tertiary');
+    if (detail >= 5) cc.push('residential', 'unclassified');
+    return cc.join('|');
   }
+  function waterMin(detail) { var m = 50 - detail * 9; return m < 8 ? 8 : m; }
 
   function getJSON(url, cb) {
     var x = new XMLHttpRequest();
@@ -111,17 +114,17 @@ module.exports = function (minified) {
 
   function drawVector(mctx, c, lc, z, tok, done) {
     var ink = c.style === 5 ? '#ffffff' : '#000000';
-    function wpolys(els) {
+    function wpolys(els, minN) {
       var out = [];
       for (var i = 0; i < els.length; i++) {
         var el = els[i], tg = el.tags || {};
         if (tg.natural !== 'water') continue;
-        if (el.type === 'way' && el.geometry && el.geometry.length >= 20) out.push(el.geometry);
+        if (el.type === 'way' && el.geometry && el.geometry.length >= minN) out.push(el.geometry);
         else if (el.type === 'relation' && el.members) {
           for (var m = 0; m < el.members.length; m++) {
             var mm = el.members[m];
             if (mm.type === 'way' && (mm.role === 'outer' || !mm.role) &&
-                mm.geometry && mm.geometry.length >= 20) out.push(mm.geometry);
+                mm.geometry && mm.geometry.length >= minN) out.push(mm.geometry);
           }
         }
       }
@@ -133,7 +136,7 @@ module.exports = function (minified) {
       var els = roads.els || [], e, n, g, tags;
       // water fills (ways + relation outers)
       mctx.fillStyle = c.style === 5 ? '#555555' : '#c8c8c8';
-      var polys = wpolys(els);
+      var polys = wpolys(els, waterMin(c.detail));
       for (e = 0; e < polys.length; e++) {
         g = polys[e]; mctx.beginPath();
         for (n = 0; n < g.length; n++) {
@@ -165,7 +168,7 @@ module.exports = function (minified) {
     function yToLat(px) { var nn = Math.PI - 2 * Math.PI * (px / TILE) / Math.pow(2, z); return 180 / Math.PI * Math.atan(0.5 * (Math.exp(nn) - Math.exp(-nn))); }
     var bb = yToLat(tly + MAPH) + ',' + xToLon(tlx) + ',' + yToLat(tly) + ',' + xToLon(tlx + Wd);
     var q = '[out:json][timeout:25];(' +
-      'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
+      'way["highway"~"^(' + highwayRegex(c.detail) + ')$"](' + bb + ');' +
       'way["natural"="coastline"](' + bb + ');' +
       'way["natural"="water"](' + bb + ');' +
       'relation["natural"="water"](' + bb + ');' +
@@ -266,7 +269,7 @@ module.exports = function (minified) {
       mapc = doc.createElement('canvas'); mapc.width = Wd; mapc.height = MAPH;
 
       ['MAP_STYLE', 'SET_SCHEME', 'ZOOM', 'SET_UNITS', 'RADAR_SMOOTH', 'RADAR_SNOW',
-       'MAP_DETAIL', 'STADIA_KEY', 'MAP_URL', 'LOC_MODE', 'LOC_LAT', 'LOC_LON']
+       'DETAIL', 'STADIA_KEY', 'MAP_URL', 'LOC_MODE', 'LOC_LAT', 'LOC_LON']
         .forEach(function (k) {
           try { var it = clayConfig.getItemByMessageKey(k); if (it && it.on) it.on('change', schedule); }
           catch (e) {}

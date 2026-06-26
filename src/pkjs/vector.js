@@ -23,31 +23,37 @@ function yToLat(px, z) {
   return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
-// Which road classes to include at a given zoom — fewer when zoomed out so the
-// view stays glanceable and the query stays small.
-function highwayRegex(z) {
-  if (z <= 7) return 'motorway|trunk';
-  if (z <= 9) return 'motorway|trunk|primary';
-  if (z <= 11) return 'motorway|trunk|primary|secondary';
-  return 'motorway|trunk|primary|secondary|tertiary';
+// Road classes by detail level (1 = major only .. 5 = down to residential).
+function highwayRegex(detail) {
+  var c = ['motorway', 'trunk'];
+  if (detail >= 2) c.push('primary');
+  if (detail >= 3) c.push('secondary');
+  if (detail >= 4) c.push('tertiary');
+  if (detail >= 5) c.push('residential', 'unclassified');
+  return c.join('|');
 }
 
-var WATER_MIN_NODES = 20;   // boundaries this complex are real water bodies
+// Minimum water-body boundary size by detail level: higher detail shows
+// smaller bodies.
+function waterMinNodes(detail) {
+  var m = 50 - detail * 9;
+  return m < 8 ? 8 : m;
+}
 
 // Collect fillable water polygons (node arrays) from natural=water ways and
-// multipolygon relations, keeping only large ones (drops small ponds).
-function waterPolys(els) {
+// multipolygon relations, keeping only those with >= minNodes boundary points.
+function waterPolys(els, minNodes) {
   var out = [];
   for (var e = 0; e < els.length; e++) {
     var el = els[e], tags = el.tags || {};
     if (tags.natural !== 'water') continue;
-    if (el.type === 'way' && el.geometry && el.geometry.length >= WATER_MIN_NODES) {
+    if (el.type === 'way' && el.geometry && el.geometry.length >= minNodes) {
       out.push(el.geometry);
     } else if (el.type === 'relation' && el.members) {
       for (var m = 0; m < el.members.length; m++) {
         var mm = el.members[m];
         if (mm.type === 'way' && (mm.role === 'outer' || !mm.role) &&
-            mm.geometry && mm.geometry.length >= WATER_MIN_NODES) {
+            mm.geometry && mm.geometry.length >= minNodes) {
           out.push(mm.geometry);
         }
       }
@@ -101,8 +107,9 @@ function drawSeg(buf, W, H, x0, y0, x1, y1, col, t) {
 }
 
 // Build a bold roads+coastline RLE for the view. ink is the line GColor8 byte
-// (0xC0 black for light maps, 0xFF white for dark). cb(err, rleUint8).
-function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
+// (0xC0 black for light maps, 0xFF white for dark). detail (1..5) scales road
+// classes and the water-size threshold. cb(err, rleUint8).
+function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
   var cx = lonToX(lon, z), cy = latToY(lat, z);
   var tlx = cx - W / 2, tly = cy - H / 2;
   var west = xToLon(tlx, z), east = xToLon(tlx + W, z);
@@ -113,7 +120,7 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
   // lagoons/rivers are often relations). Small ponds are filtered by size at
   // render time so only real bodies of water show.
   var q = '[out:json][timeout:25];(' +
-    'way["highway"~"^(' + highwayRegex(z) + ')$"](' + bb + ');' +
+    'way["highway"~"^(' + highwayRegex(detail) + ')$"](' + bb + ');' +
     'way["natural"="coastline"](' + bb + ');' +
     'way["natural"="water"](' + bb + ');' +
     'relation["natural"="water"](' + bb + ');' +
@@ -131,8 +138,8 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, cb) {
       var water = ink === 0xFF ? 0xD5 : 0xEA;  // gray water fill
       var e, n, g, tags, pts;
 
-      // Pass 1: fill large water bodies (ways + relation outers).
-      var polys = waterPolys(els);
+      // Pass 1: fill water bodies (ways + relation outers) above the threshold.
+      var polys = waterPolys(els, waterMinNodes(detail));
       for (e = 0; e < polys.length; e++) {
         g = polys[e]; pts = [];
         for (n = 0; n < g.length; n++) {

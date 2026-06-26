@@ -60,7 +60,7 @@ function getConfig() {
     snow: s.RADAR_SNOW === false ? 0 : 1,
     frames: Math.max(1, Math.min(10, num(s.SET_FRAMES, 10) | 0)),
     animate: s.SET_ANIMATE === false ? 0 : 1,
-    detail: num(s.MAP_DETAIL, 1) | 0,
+    detail: Math.max(1, Math.min(5, num(s.DETAIL, 3) | 0)),
     zoom: Math.max(3, Math.min(11, num(s.ZOOM, 6) | 0)),
     // Map style (see mapPlan): 1 light HC (default), 3 dark HC, 4 Stamen Toner
     // streets, 0 full color, 2 dark grayscale, 9 custom URL.
@@ -79,7 +79,7 @@ function getConfig() {
 // so it's the "streets" option; it needs a free Stadia Maps API key. Without a
 // key it falls back to the no-key high-contrast land/water map.
 function mapPlan(c) {
-  var labels = c.detail >= 2;
+  var labels = c.detail >= 4;
   var voy = 'https://a.basemaps.cartocdn.com/rastertiles/voyager' +
             (labels ? '' : '_nolabels') + '/{z}/{x}/{y}.png';
   switch (c.style) {
@@ -291,7 +291,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
     if (isVector) {
       sendStatus('Loading map...');
       var ink = c.style === 5 ? 0xFF : 0xC0;
-      vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink,
+      vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink, c.detail,
         function (err, rle) {
           if (err || !rle) {        // Overpass unavailable -> raster fallback
             sendStatus('Roads unavailable');
