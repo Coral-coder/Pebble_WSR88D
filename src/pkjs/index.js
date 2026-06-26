@@ -67,24 +67,43 @@ function getConfig() {
     animate: s.SET_ANIMATE === false ? 0 : 1,
     detail: num(s.MAP_DETAIL, 1) | 0,
     zoom: Math.max(3, Math.min(11, num(s.ZOOM, 6) | 0)),
-    // Map style: 0 light, 1 light high-contrast, 2 dark, 3 dark high-contrast.
-    // High-contrast (1) is the default — it reads best on the watch.
+    // Map style (see mapPlan): 1 light HC (default), 3 dark HC, 4 Stamen Toner
+    // streets, 0 full color, 2 dark grayscale, 9 custom URL.
     style: num(s.MAP_STYLE, 1) | 0,
-    invert: num(s.MAP_STYLE, 1) >= 2 ? 1 : 0,
-    contrast: (num(s.MAP_STYLE, 1) | 0) === 1 ||
-              (num(s.MAP_STYLE, 1) | 0) === 3 ? 1 : 0,
+    invert: (num(s.MAP_STYLE, 1) | 0) === 2 ||
+            (num(s.MAP_STYLE, 1) | 0) === 3 ? 1 : 0,
+    stadiaKey: typeof s.STADIA_KEY === 'string' ? s.STADIA_KEY.replace(/\s/g, '') : '',
+    mapUrlCustom: (typeof s.MAP_URL === 'string' && s.MAP_URL.indexOf('{z}') >= 0)
+      ? s.MAP_URL : '',
     units: num(s.SET_UNITS, 0) | 0,
     updateMin: num(s.SET_UPDATE_MIN, 10) | 0
   };
 }
 
-// Always fetch the high-contrast CARTO Voyager tiles; dark mode is produced by
-// inverting them in render.js (Dark Matter tiles quantize to near-black).
-// "Detailed" (2) keeps place labels; otherwise a cleaner no-labels style.
-function mapStyleUrl(c) {
+// Resolve the tile URL + render mode + dark background for the chosen style.
+// Stamen Toner (style 4) is the only source with true black roads on white,
+// so it's the "streets" option; it needs a free Stadia Maps API key. Without a
+// key it falls back to the no-key high-contrast land/water map.
+function mapPlan(c) {
   var labels = c.detail >= 2;
-  return 'https://a.basemaps.cartocdn.com/rastertiles/voyager' +
-         (labels ? '' : '_nolabels') + '/{z}/{x}/{y}.png';
+  var voy = 'https://a.basemaps.cartocdn.com/rastertiles/voyager' +
+            (labels ? '' : '_nolabels') + '/{z}/{x}/{y}.png';
+  switch (c.style) {
+    case 0: return { url: voy, mode: 'color', invert: 0 };
+    case 2: return { url: voy, mode: 'darkgray', invert: 1 };
+    case 3: return { url: voy, mode: 'darkhc', invert: 1 };
+    case 4:
+      if (c.stadiaKey) {
+        return { url: 'https://tiles.stadiamaps.com/tiles/stamen_toner/' +
+                 '{z}/{x}/{y}.png?api_key=' + encodeURIComponent(c.stadiaKey),
+                 mode: 'raw', invert: 0 };
+      }
+      return { url: voy, mode: 'hc', invert: 0, note: 'Add a Stadia key for streets' };
+    case 9:
+      if (c.mapUrlCustom) return { url: c.mapUrlCustom, mode: 'color', invert: 0 };
+      return { url: voy, mode: 'hc', invert: 0 };
+    default: return { url: voy, mode: 'hc', invert: 0 };  // 1 = light HC
+  }
 }
 
 // Repair stored settings that were written in Clay's raw (unflattened) form,
@@ -247,7 +266,9 @@ function runRefresh(c, loc, host, frames, forceBase) {
   var zRad = Math.min(zMap, RADAR_MAX_ZOOM);      // radar tiles cap at 7
   var W = dims.w, H = dims.h;
   var nframes = frames.length;
-  var mapUrl = mapStyleUrl(c);
+  var plan = mapPlan(c);
+  var mapUrl = plan.url;
+  if (plan.note) sendStatus(plan.note);
 
   var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), zMap, c.detail,
                  c.style, W, H, mapUrl].join('|');
@@ -290,7 +311,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
     tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
       function (err, view, ok) {
         if (!ok) { finish('Map offline'); return; }
-        var rle = render.mapToRLE(view, W, H, c.invert, c.contrast);
+        var rle = render.mapToRLE(view, W, H, plan.mode);
         pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
         lastBaseKey = baseKey;
         transport.sendImage(IMG_KIND_BASE, 0, rle, function () {

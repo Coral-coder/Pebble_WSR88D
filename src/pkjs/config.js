@@ -59,11 +59,21 @@ module.exports = [
     ] },
   { "type": "select", "messageKey": "MAP_STYLE", "label": "Map style",
     "defaultValue": 1, "options": [
-      { "label": "Light — high contrast", "value": 1 },
+      { "label": "High contrast (land/water)", "value": 1 },
+      { "label": "Streets — Stamen Toner (needs key)", "value": 4 },
       { "label": "Dark — high contrast", "value": 3 },
-      { "label": "Light — full color", "value": 0 },
-      { "label": "Dark — grayscale", "value": 2 }
+      { "label": "Dark — grayscale", "value": 2 },
+      { "label": "Full color", "value": 0 },
+      { "label": "Custom tile URL", "value": 9 }
     ] },
+  { "type": "input", "messageKey": "STADIA_KEY",
+    "label": "Stadia Maps API key",
+    "description": "Free at stadiamaps.com — enables the Streets (Stamen Toner) style with real black roads.",
+    "attributes": { "placeholder": "paste key for Streets style" } },
+  { "type": "input", "messageKey": "MAP_URL",
+    "label": "Custom tile URL",
+    "description": "Used only by the 'Custom tile URL' style.",
+    "attributes": { "placeholder": "https://.../{z}/{x}/{y}.png" } },
 
   { "type": "heading", "defaultValue": "Display", "size": 4 },
   { "type": "radiogroup", "messageKey": "SET_UNITS", "label": "Units",

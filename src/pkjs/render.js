@@ -128,26 +128,28 @@ function toGray(v) {
   return 0xC0 | (q << 4) | (q << 2) | q;
 }
 
-// Render the (light Voyager) basemap into Pebble GColor8 pixels — a real
-// filled map, not line art. All modes use the high-contrast light tiles; dark
-// mode inverts them in software (Dark Matter tiles are too dark to survive
-// 2-bit quantization), which guarantees a visible map.
-//   dark: render as a dark map (light features on black).
-//   contrast: stark 2-tone for maximum legibility.
-function mapToRLE(rgba, W, H, dark, contrast) {
+// Render a basemap tile into Pebble GColor8 pixels. `mode` selects how:
+//   'raw'      quantize the tile as-is (for already-styled sources like Stamen
+//              Toner: black roads stay black, white stays white);
+//   'color'    full-color quantize (Voyager);
+//   'hc'       light high-contrast 2-tone (dark features -> black on white);
+//   'darkhc'   dark high-contrast (features white on black);
+//   'darkgray' inverted neutral-gray night map.
+function mapToRLE(rgba, W, H, mode) {
   var colors = new Uint8Array(W * H);
+  var dark = (mode === 'darkhc' || mode === 'darkgray');
   var bg = dark ? 0xC0 : 0xFF;
   for (var p = 0, i = 0; p < W * H; p++, i += 4) {
     if (rgba[i + 3] < 128) { colors[p] = bg; continue; }
     var lum = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
-    if (contrast) {
-      // Darker pixels (water/parks/urban/coast/boundaries) are the map content.
-      var feat = lum < HC_CUT;
-      colors[p] = feat ? (dark ? 0xFF : 0xC0) : (dark ? 0xC0 : 0xFF);
-    } else if (dark) {
-      colors[p] = toGray(255 - lum);          // inverted grayscale night map
+    if (mode === 'hc') {
+      colors[p] = lum < HC_CUT ? 0xC0 : 0xFF;
+    } else if (mode === 'darkhc') {
+      colors[p] = lum < HC_CUT ? 0xFF : 0xC0;
+    } else if (mode === 'darkgray') {
+      colors[p] = toGray(255 - lum);
     } else {
-      colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);  // full color
+      colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);  // color / raw
     }
   }
   return encodeRLE(colors);
