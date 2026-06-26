@@ -77,14 +77,11 @@ function getConfig() {
   };
 }
 
-// Pick a real CARTO basemap: dark mode -> Dark Matter, light mode -> Voyager.
-// Map detail "Detailed" (2) keeps labels; otherwise a cleaner no-labels style.
+// Always fetch the high-contrast CARTO Voyager tiles; dark mode is produced by
+// inverting them in render.js (Dark Matter tiles quantize to near-black).
+// "Detailed" (2) keeps place labels; otherwise a cleaner no-labels style.
 function mapStyleUrl(c) {
   var labels = c.detail >= 2;
-  if (c.invert) {
-    return 'https://a.basemaps.cartocdn.com/dark_' +
-           (labels ? 'all' : 'nolabels') + '/{z}/{x}/{y}.png';
-  }
   return 'https://a.basemaps.cartocdn.com/rastertiles/voyager' +
          (labels ? '' : '_nolabels') + '/{z}/{x}/{y}.png';
 }
@@ -250,7 +247,6 @@ function runRefresh(c, loc, host, frames, forceBase) {
   var W = dims.w, H = dims.h;
   var nframes = frames.length;
   var mapUrl = mapStyleUrl(c);
-  var mapBg = c.invert ? 0xC0 : 0xFF;             // black (dark) / white (light)
 
   var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), zMap, c.detail,
                  c.style, W, H, mapUrl].join('|');
@@ -293,7 +289,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
     tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
       function (err, view, ok) {
         if (!ok) { finish('Map offline'); return; }
-        var rle = render.mapToRLE(view, W, H, mapBg, c.contrast);
+        var rle = render.mapToRLE(view, W, H, c.invert, c.contrast);
         pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
         lastBaseKey = baseKey;
         transport.sendImage(IMG_KIND_BASE, 0, rle, function () {

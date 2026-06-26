@@ -117,25 +117,32 @@ function mapEdgesToRLE(rgba, W, H, detail, ink) {
   return encodeRLE(colors);
 }
 
-// Render an actual basemap tile (light or dark style) by quantizing every
-// pixel to a Pebble GColor8 — a real filled map, not line art. Missing tiles
-// (alpha 0) fall back to the background color.
-//   bg: 0xFF for light, 0xC0 for dark.
-//   contrast: when true, snap to a stark 2-tone map (features in the opposite
-//   color of bg) for maximum legibility.
-function mapToRLE(rgba, W, H, bg, contrast) {
+// Neutral-gray GColor8 from a 0..255 value (2 bits/channel).
+function toGray(v) {
+  var q = (v + 42) / 85 | 0; if (q < 0) q = 0; if (q > 3) q = 3;
+  return 0xC0 | (q << 4) | (q << 2) | q;
+}
+
+// Render the (light Voyager) basemap into Pebble GColor8 pixels — a real
+// filled map, not line art. All modes use the high-contrast light tiles; dark
+// mode inverts them in software (Dark Matter tiles are too dark to survive
+// 2-bit quantization), which guarantees a visible map.
+//   dark: render as a dark map (light features on black).
+//   contrast: stark 2-tone for maximum legibility.
+function mapToRLE(rgba, W, H, dark, contrast) {
   var colors = new Uint8Array(W * H);
-  var ink = bg === 0xFF ? 0xC0 : 0xFF;   // feature color opposite the background
-  var light = bg === 0xFF;
+  var bg = dark ? 0xC0 : 0xFF;
   for (var p = 0, i = 0; p < W * H; p++, i += 4) {
     if (rgba[i + 3] < 128) { colors[p] = bg; continue; }
+    var lum = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
     if (contrast) {
-      var lum = (rgba[i] * 77 + rgba[i + 1] * 150 + rgba[i + 2] * 29) >> 8;
-      // On a light map, darker pixels (roads/water/coast) become ink; on a
-      // dark map, lighter pixels become ink.
-      colors[p] = (light ? lum < 150 : lum > 120) ? ink : bg;
+      // Dark features (roads/water/coast/labels) are the map content.
+      var feat = lum < 150;
+      colors[p] = feat ? (dark ? 0xFF : 0xC0) : (dark ? 0xC0 : 0xFF);
+    } else if (dark) {
+      colors[p] = toGray(255 - lum);          // inverted grayscale night map
     } else {
-      colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);
+      colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);  // full color
     }
   }
   return encodeRLE(colors);
