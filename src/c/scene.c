@@ -4,6 +4,13 @@
 #define ANIM_FRAME_MS 280   // dwell per frame while looping
 #define ANIM_HOLD_MS  900   // extra dwell on the newest frame at the end
 
+// Persisted base map so it survives app reloads (no blank screen). The RLE is
+// split into 256-byte chunks across consecutive persist keys.
+#define PK_BASE_LEN     200
+#define PK_BASE_CHUNK0  201
+#define PERSIST_CHUNK   256
+#define PK_BASE_MAX     16384   // don't persist maps larger than this
+
 static Layer *s_layer;
 static int s_w, s_h;
 static int s_ox, s_oy;   // layer origin on screen (framebuffer is full-screen)
@@ -145,10 +152,44 @@ static void free_frames(void) {
   s_display_frame = -1;
 }
 
+// Save the base map to persistent storage (chunked). On any failure the
+// stored copy is invalidated so we never load a partial map.
+static void persist_base(const uint8_t *buf, uint32_t len) {
+  if (!buf || len == 0 || len > PK_BASE_MAX) { persist_delete(PK_BASE_LEN); return; }
+  uint32_t off = 0; int idx = 0; bool ok = true;
+  while (off < len) {
+    uint32_t n = len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
+    if (persist_write_data(PK_BASE_CHUNK0 + idx, buf + off, n) < (int)n) { ok = false; break; }
+    off += n; idx++;
+  }
+  if (ok) persist_write_int(PK_BASE_LEN, (int32_t)len);
+  else persist_delete(PK_BASE_LEN);
+}
+
+// Load a previously persisted base map, or NULL if none/incomplete.
+static uint8_t *load_persisted_base(uint32_t *out_len) {
+  if (!persist_exists(PK_BASE_LEN)) return NULL;
+  int32_t len = persist_read_int(PK_BASE_LEN);
+  if (len <= 0 || len > PK_BASE_MAX) return NULL;
+  uint8_t *buf = malloc(len);
+  if (!buf) return NULL;
+  uint32_t off = 0; int idx = 0;
+  while (off < (uint32_t)len) {
+    uint32_t n = (uint32_t)len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
+    if (persist_read_data(PK_BASE_CHUNK0 + idx, buf + off, n) < (int)n) { free(buf); return NULL; }
+    off += n; idx++;
+  }
+  *out_len = (uint32_t)len;
+  return buf;
+}
+
 void scene_set_base(uint8_t *rle, uint32_t len) {
+  // Only replace the map when a complete new one arrives; never with nothing.
+  if (!rle || len == 0) { if (rle) free(rle); return; }
   if (s_base) free(s_base);
   s_base = rle;
   s_base_len = len;
+  persist_base(rle, len);
   if (s_layer) layer_mark_dirty(s_layer);
 }
 
@@ -197,6 +238,12 @@ Layer *scene_create_layer(GRect frame) {
   s_ox = frame.origin.x;   // scene layer is a direct child of the root layer,
   s_oy = frame.origin.y;   // so its frame origin is its screen position
   s_display_frame = -1;
+  // Restore the cached map immediately so a reload never shows a blank screen.
+  if (!s_base) {
+    uint32_t plen = 0;
+    uint8_t *pbuf = load_persisted_base(&plen);
+    if (pbuf) { s_base = pbuf; s_base_len = plen; }
+  }
   layer_set_update_proc(s_layer, scene_update);
   return s_layer;
 }
