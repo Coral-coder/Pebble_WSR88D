@@ -134,6 +134,7 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
     try {
       var data = JSON.parse(xhr.responseText);
       var els = data.elements || [];
+      if (!els.length) { cb(new Error('empty')); return; }  // don't blank the map
       var buf = new Uint8Array(W * H);  // 0 = transparent
       var water = ink === 0xFF ? 0xD5 : 0xEA;  // gray water fill
       var e, n, g, tags, pts;

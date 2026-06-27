@@ -265,7 +265,8 @@ function runRefresh(c, loc, host, frames, forceBase) {
   var plan = isVector ? { url: 'vector', mode: '' } : mapPlan(c);
   if (plan.note) sendStatus(plan.note);
 
-  var baseKey = [loc.lat.toFixed(3), loc.lon.toFixed(3), zMap, c.detail,
+  // Round location to ~1km so GPS jitter doesn't keep re-fetching the map.
+  var baseKey = [loc.lat.toFixed(2), loc.lon.toFixed(2), zMap, c.detail,
                  c.style, W, H, plan.url].join('|');
   var needBase = forceBase || baseKey !== lastBaseKey;
 
@@ -293,7 +294,10 @@ function runRefresh(c, loc, host, frames, forceBase) {
       var ink = c.style === 5 ? 0xFF : 0xC0;
       vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink, c.detail,
         function (err, rle) {
-          if (err || !rle) {        // Overpass unavailable -> raster fallback
+          if (err || !rle) {
+            // Keep the existing good map rather than blanking it; only fall
+            // back to a raster map if we've never drawn one yet.
+            if (lastBaseKey) { done(true); return; }
             sendStatus('Roads unavailable');
             buildRaster(mapPlan({ style: 1, detail: c.detail }).url, 'hc', done);
             return;
