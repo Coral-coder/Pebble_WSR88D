@@ -33,7 +33,18 @@ var RADAR_MAX_ZOOM = 7;          // RainViewer tile cap
 var dims = { w: 200, h: 164 };   // updated from the watch's SCR_W/SCR_H
 var busy = false;
 var pending = false;
-var lastBaseKey = null;          // skip resending the map when unchanged
+// Identity of the map currently on the watch; the map is only re-fetched when
+// the view params change or the user moves >10% of the map width.
+var lastBase = null;             // { lat, lon, zoom, detail, style, w, h }
+
+function distanceM(lat1, lon1, lat2, lon2) {
+  var R = 6371000, rad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * rad, dLon = (lon2 - lon1) * rad;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * rad) * Math.cos(lat2 * rad) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 // Exact-preview state: the actual pixel buffers (RLE) last sent to the watch.
 // Passed to the settings page via Clay userData (the config webview has its own
@@ -226,10 +237,10 @@ function fetchRadarIndex(cb) {
 function finish(errText) {
   busy = false;
   if (errText) sendErr(errText);
-  if (pending) { pending = false; doRefresh(false); }
+  if (pending) { pending = false; doRefresh(); }
 }
 
-function doRefresh(forceBase) {
+function doRefresh() {
   if (busy) { pending = true; return; }
   busy = true;
 
@@ -250,12 +261,12 @@ function doRefresh(forceBase) {
       var past = idx.radar.past;
       var n = Math.min(c.frames, past.length);
       var frames = past.slice(past.length - n);   // oldest .. newest
-      runRefresh(c, loc, idx.host, frames, forceBase);
+      runRefresh(c, loc, idx.host, frames);
     });
   });
 }
 
-function runRefresh(c, loc, host, frames, forceBase) {
+function runRefresh(c, loc, host, frames) {
   pv.lat = loc.lat; pv.lon = loc.lon;            // for the live settings preview
   var zMap = c.zoom;                              // map zoom (3..11)
   var zRad = Math.min(zMap, RADAR_MAX_ZOOM);      // radar tiles cap at 7
@@ -265,14 +276,19 @@ function runRefresh(c, loc, host, frames, forceBase) {
   var plan = isVector ? { url: 'vector', mode: '' } : mapPlan(c);
   if (plan.note) sendStatus(plan.note);
 
-  // Round location to ~1km so GPS jitter doesn't keep re-fetching the map.
-  var baseKey = [loc.lat.toFixed(2), loc.lon.toFixed(2), zMap, c.detail,
-                 c.style, W, H, plan.url].join('|');
-  var needBase = forceBase || baseKey !== lastBaseKey;
+  // Re-fetch the map ONLY when the view params change or the user has moved
+  // more than 10% of the visible map width. Otherwise keep what's on the watch.
+  var sameView = lastBase && lastBase.zoom === zMap && lastBase.detail === c.detail &&
+                 lastBase.style === c.style && lastBase.w === W && lastBase.h === H &&
+                 lastBase.url === plan.url;
+  var mpp = 156543.03 * Math.cos(loc.lat * Math.PI / 180) / Math.pow(2, zMap);
+  var moved = sameView ? distanceM(lastBase.lat, lastBase.lon, loc.lat, loc.lon) : Infinity;
+  var needBase = !sameView || moved > 0.10 * (W * mpp);
 
   function stashAndSendBase(rle, done) {
     pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
-    lastBaseKey = baseKey;
+    lastBase = { lat: loc.lat, lon: loc.lon, zoom: zMap, detail: c.detail,
+                 style: c.style, w: W, h: H, url: plan.url };
     transport.sendImage(IMG_KIND_BASE, 0, rle, function () { done(true); });
   }
 
@@ -297,7 +313,7 @@ function runRefresh(c, loc, host, frames, forceBase) {
           if (err || !rle) {
             // Keep the existing good map rather than blanking it; only fall
             // back to a raster map if we've never drawn one yet.
-            if (lastBaseKey) { done(true); return; }
+            if (lastBase) { done(true); return; }
             sendStatus('Roads unavailable');
             buildRaster(mapPlan({ style: 1, detail: c.detail }).url, 'hc', done);
             return;
@@ -351,18 +367,16 @@ function runRefresh(c, loc, host, frames, forceBase) {
 Pebble.addEventListener('ready', function () {
   sanitizeStoredSettings();
   syncSettingsToWatch();
-  doRefresh(true);
+  doRefresh();
 });
 
 Pebble.addEventListener('appmessage', function (e) {
   var p = e.payload || {};
   if (p.SCR_W) dims.w = p.SCR_W;
   if (p.SCR_H) dims.h = p.SCR_H;
-  if (typeof p.REQUEST !== 'undefined') {
-    var hello = p.REQUEST === REQ_HELLO;
-    if (hello) lastBaseKey = null;  // watch reloaded: resend the map too
-    doRefresh(hello);
-  }
+  // A request (launch or interval) refreshes radar; the map is only re-fetched
+  // by doRefresh() if the view changed or we've moved >10% of the map width.
+  if (typeof p.REQUEST !== 'undefined') doRefresh();
 });
 
 Pebble.addEventListener('showConfiguration', function () {
@@ -386,6 +400,7 @@ Pebble.addEventListener('webviewclosed', function (e) {
   // manipulators on the next open and breaks getConfig()).
   clay.getSettings(e.response);
   syncSettingsToWatch();
-  lastBaseKey = null;             // settings may change the map; force resend
-  doRefresh(true);
+  // The map re-fetches only if style/detail/zoom actually changed (handled by
+  // the view check in runRefresh); scheme/units changes just update the radar.
+  doRefresh();
 });
