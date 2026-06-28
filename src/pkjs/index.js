@@ -409,11 +409,10 @@ Pebble.addEventListener('appmessage', function (e) {
   if (typeof p.REQUEST !== 'undefined') doRefresh();
 });
 
-Pebble.addEventListener('showConfiguration', function () {
-  sanitizeStoredSettings();       // repair any legacy bad storage before prefill
-  // Hand the exact last-rendered pixel buffers to the config page so it can
-  // draw a pixel-accurate preview (the config webview can't read our storage).
-  // Buffers ride in the config URL, so cap their size; the vector map is small.
+// Hand the phone's last location + weather to the config page (the config
+// webview has its own origin and can't read our storage, so it rides in the
+// config URL). Kept small — the live preview fetches its own map/radar.
+function setUserData() {
   try {
     clay.meta = clay.meta || {};
     clay.meta.userData = {
@@ -421,17 +420,33 @@ Pebble.addEventListener('showConfiguration', function () {
       build: BUILD, repo: REPO
     };
   } catch (e) {}
+}
+
+function openConfig() {
+  setUserData();
   Pebble.openURL(clay.generateUrl());
+}
+
+Pebble.addEventListener('showConfiguration', function () {
+  sanitizeStoredSettings();       // repair any legacy bad storage before prefill
+  openConfig();
 });
 
 Pebble.addEventListener('webviewclosed', function (e) {
   if (!e || !e.response) return;
   // clay.getSettings() flattens {value:x} wrappers to scalars and writes them
   // to localStorage itself — do NOT overwrite that (raw form crashes Clay's
-  // manipulators on the next open and breaks getConfig()).
-  clay.getSettings(e.response);
+  // manipulators on the next open and breaks getConfig()). It also returns the
+  // parsed settings, which carry the KEEP_OPEN flag set by the Save/Exit
+  // buttons in the settings page.
+  var s = clay.getSettings(e.response) || {};
   syncSettingsToWatch();
   // The map re-fetches only if style/detail/zoom actually changed (handled by
   // the view check in runRefresh); scheme/units changes just update the radar.
   doRefresh();
+  // "Save" (KEEP_OPEN = 1) applies the settings but re-opens the config so the
+  // user can keep adjusting without leaving; "Exit" (0) just closes.
+  if (s.KEEP_OPEN === '1' || s.KEEP_OPEN === 1) {
+    try { openConfig(); } catch (e2) {}
+  }
 });
