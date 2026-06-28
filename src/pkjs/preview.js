@@ -252,19 +252,50 @@ module.exports = function (minified) {
     try {
       if (typeof document === 'undefined') return;
       var doc = document;
+
+      // Sticky bar pinned to the top: preview on the left, Save on the right.
+      // The options scroll underneath, so a change is always visible.
       var holder = doc.createElement('div');
-      holder.style.cssText = 'text-align:center;padding:16px 0 6px;';
+      holder.style.cssText = 'position:sticky;top:0;z-index:50;background:#1b1b1d;' +
+        'display:flex;align-items:center;justify-content:center;gap:16px;' +
+        'padding:10px;border-bottom:1px solid #333;';
+
+      main = doc.createElement('canvas'); main.width = Wd; main.height = Ht;
+      main.style.cssText = 'width:150px;height:171px;border:3px solid #444;border-radius:14px;background:#000;flex:0 0 auto;';
+
+      var col = doc.createElement('div');
+      col.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;';
       var cap = doc.createElement('div');
       cap.textContent = 'LIVE PREVIEW';
-      cap.style.cssText = 'color:#888;font:600 12px sans-serif;letter-spacing:.1em;margin-bottom:8px;';
-      main = doc.createElement('canvas'); main.width = Wd; main.height = Ht;
-      main.style.cssText = 'width:160px;height:183px;border:3px solid #444;border-radius:14px;background:#000;';
-      holder.appendChild(cap); holder.appendChild(main);
+      cap.style.cssText = 'color:#888;font:600 11px sans-serif;letter-spacing:.1em;';
+      var saveBtn = doc.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.textContent = 'Save';
+      saveBtn.style.cssText = 'padding:12px 26px;border:0;border-radius:9px;' +
+        'background:#1f8f4f;color:#fff;font:700 15px sans-serif;cursor:pointer;';
+      saveBtn.onclick = function () {
+        try {
+          var rs = doc.querySelector('input[type="submit"], button[type="submit"]');
+          if (rs) rs.click();
+        } catch (e) {}
+      };
+      col.appendChild(cap); col.appendChild(saveBtn);
+      holder.appendChild(main); holder.appendChild(col);
+
       var root = (clayConfig.$rootContainer &&
         (clayConfig.$rootContainer[0] ||
          (clayConfig.$rootContainer.get && clayConfig.$rootContainer.get(0)))) || doc.body;
       if (root && root.insertBefore) root.insertBefore(holder, root.firstChild);
       else if (root && root.appendChild) root.appendChild(holder);
+
+      // Hide Clay's bottom Save button — the sticky one replaces it.
+      try {
+        var orig = doc.querySelector('input[type="submit"], button[type="submit"]');
+        if (orig) {
+          var wrap = (orig.parentNode && orig.parentNode !== holder) ? orig.parentNode : orig;
+          if (wrap !== holder) wrap.style.display = 'none';
+        }
+      } catch (e) {}
 
       mapc = doc.createElement('canvas'); mapc.width = Wd; mapc.height = MAPH;
 
@@ -302,7 +333,9 @@ module.exports = function (minified) {
               a.textContent = 'Tap to install';
               a.style.cssText = 'display:block;margin-top:6px;color:#fff;';
               bn.appendChild(a);
-              if (root && root.insertBefore) root.insertBefore(bn, root.firstChild);
+              // Place the banner just below the sticky preview bar.
+              if (root && root.insertBefore) root.insertBefore(bn, holder.nextSibling);
+              else if (root && root.appendChild) root.appendChild(bn);
             } catch (e) {}
           };
           ux.send();
