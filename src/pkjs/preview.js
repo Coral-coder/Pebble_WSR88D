@@ -276,6 +276,38 @@ module.exports = function (minified) {
         });
 
       render();
+
+      // "Update available" banner with a one-tap install link.
+      try {
+        var u = ud();
+        if (u && u.repo) {
+          var ux = new XMLHttpRequest();
+          ux.open('GET', 'https://api.github.com/repos/' + u.repo + '/releases/latest', true);
+          ux.onload = function () {
+            try {
+              var r = JSON.parse(ux.responseText);
+              var m = /(\d+)/.exec(r.tag_name || '');
+              var latest = m ? parseInt(m[1], 10) : 0;
+              if (latest <= (u.build || 0)) return;
+              var pbw = '', as = r.assets || [];
+              for (var i = 0; i < as.length; i++) {
+                if (/\.pbw$/i.test(as[i].name)) { pbw = as[i].browser_download_url; break; }
+              }
+              var bn = doc.createElement('div');
+              bn.style.cssText = 'margin:12px;padding:12px;border-radius:10px;' +
+                'background:#1f6f3f;color:#fff;font:600 13px sans-serif;text-align:center;';
+              bn.appendChild(doc.createTextNode('Update available — Build ' + latest));
+              var a = doc.createElement('a');
+              a.href = pbw || ('https://github.com/' + u.repo + '/releases/latest');
+              a.textContent = 'Tap to install';
+              a.style.cssText = 'display:block;margin-top:6px;color:#fff;';
+              bn.appendChild(a);
+              if (root && root.insertBefore) root.insertBefore(bn, root.firstChild);
+            } catch (e) {}
+          };
+          ux.send();
+        }
+      } catch (e) {}
     } catch (e) {}
   });
 };

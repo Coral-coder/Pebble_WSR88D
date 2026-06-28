@@ -6,12 +6,18 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write          # needed to publish releases
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Stamp build number into the app
+        run: echo "module.exports = ${{ github.run_number }};" > src/pkjs/build_number.js
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
@@ -51,3 +57,19 @@ jobs:
           name: wsr88d-radar
           path: build/*.pbw
           if-no-files-found: error
+
+      # Publish a GitHub Release (marked "latest") with the .pbw on every push,
+      # so the app can detect it and offer a one-tap install.
+      - name: Publish release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: b${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          make_latest: true
+          files: build/*.pbw
+          body: |
+            Automated build ${{ github.run_number }} (commit ${{ github.sha }}).
+            Install the attached `.pbw` via the Pebble app (Dev Connect, or open
+            the file). The watchface also offers a one-tap install from its
+            settings page when a newer build is available.

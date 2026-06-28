@@ -18,6 +18,35 @@ var tiles = require('./tiles.js');
 var render = require('./render.js');
 var vector = require('./vector.js');
 var transport = require('./transport.js');
+var BUILD = require('./build_number.js');   // CI run number this app was built from
+
+var REPO = 'Coral-coder/Pebble_WSR88D';
+var notifiedBuild = 0;
+
+// Check GitHub for a newer release and notify on the watch if one exists.
+// (The settings page also shows a one-tap install link — see preview.js.)
+function checkForUpdate() {
+  try {
+    var x = new XMLHttpRequest();
+    x.open('GET', 'https://api.github.com/repos/' + REPO + '/releases/latest', true);
+    x.timeout = 15000;
+    x.onload = function () {
+      try {
+        var r = JSON.parse(x.responseText);
+        var m = /(\d+)/.exec(r.tag_name || '');
+        var latest = m ? parseInt(m[1], 10) : 0;
+        if (latest > BUILD && latest !== notifiedBuild) {
+          notifiedBuild = latest;
+          if (Pebble.showSimpleNotificationOnPebble) {
+            Pebble.showSimpleNotificationOnPebble('WSR-88D Radar update',
+              'Build ' + latest + ' is available. Open the watchface settings to install.');
+          }
+        }
+      } catch (e) {}
+    };
+    x.send();
+  } catch (e) {}
+}
 
 // Must match src/c/wsr88d.h
 var REQ_REFRESH = 1;
@@ -368,6 +397,7 @@ Pebble.addEventListener('ready', function () {
   sanitizeStoredSettings();
   syncSettingsToWatch();
   doRefresh();
+  checkForUpdate();
 });
 
 Pebble.addEventListener('appmessage', function (e) {
@@ -391,7 +421,8 @@ Pebble.addEventListener('showConfiguration', function () {
   try {
     clay.meta = clay.meta || {};
     clay.meta.userData = {
-      w: pv.w, h: pv.h, wx: pv.wx, scan: pv.scan, lat: pv.lat, lon: pv.lon
+      w: pv.w, h: pv.h, wx: pv.wx, scan: pv.scan, lat: pv.lat, lon: pv.lon,
+      build: BUILD, repo: REPO
     };
   } catch (e) {}
   Pebble.openURL(clay.generateUrl());

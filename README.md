@@ -108,7 +108,17 @@ Connect, sign in with GitHub) and `pebble install --phone <ip>`.
 
 Every push builds the `.pbw` via GitHub Actions
 (`.github/workflows/build.yml`) and uploads it as the **`wsr88d-radar`**
-artifact. Download it from the run's Artifacts section and side-load it.
+artifact. It also publishes a **GitHub Release** (`b<run#>`, marked *latest*)
+with the `.pbw` attached.
+
+### Updating
+
+The build number (the CI run number) is stamped into each build. On launch the
+app checks the repo's latest release; if a newer build exists it shows a watch
+notification and an **"Update available — Tap to install"** link at the top of
+the settings page. Tapping the `.pbw` link installs it via the Pebble app.
+(Sideloaded apps can't fully silently self-update, so the final install is one
+tap.)
 
 ## Notes & limits
 
