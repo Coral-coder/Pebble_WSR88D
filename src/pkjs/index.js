@@ -375,8 +375,12 @@ Pebble.addEventListener('appmessage', function (e) {
   if (p.SCR_W) dims.w = p.SCR_W;
   if (p.SCR_H) dims.h = p.SCR_H;
   // A request (launch or interval) refreshes radar; the map is only re-fetched
-  // by doRefresh() if the view changed or we've moved >10% of the map width.
-  if (typeof p.REQUEST !== 'undefined') doRefresh();
+  // if the view changed or we've moved >10% of the map width. On watch
+  // (re)start, force one full-res map so the cached half-res mask is upgraded.
+  if (typeof p.REQUEST !== 'undefined') {
+    if (p.REQUEST === REQ_HELLO) lastBase = null;
+    doRefresh();
+  }
 });
 
 Pebble.addEventListener('showConfiguration', function () {
