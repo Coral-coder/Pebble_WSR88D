@@ -275,12 +275,6 @@ void scene_set_frame(uint8_t idx, uint8_t *rle, uint32_t len) {
 
 void scene_end_batch(void) {
   s_display_frame = s_frame_count > 0 ? s_frame_count - 1 : -1;  // newest
-  // Cache the newest radar frame so a reload shows radar immediately too.
-  if (s_frame_count > 0) {
-    persist_put(PK_RADAR_LEN, PK_RADAR_CHUNK0,
-                s_frames[s_frame_count - 1], s_frame_len[s_frame_count - 1],
-                PK_RADAR_MAX);
-  }
   if (s_layer) layer_mark_dirty(s_layer);
 }
 
@@ -309,7 +303,12 @@ Layer *scene_create_layer(GRect frame) {
   s_display_frame = -1;
   s_invert = settings_get()->invert;   // cached ink/bg must match the style
 
-  // Restore cached map + newest radar so a reload never shows a blank screen.
+  // Free any radar keys a previous version stored — the map cache is the
+  // priority and must always have room in the 4KB budget.
+  persist_delete(PK_RADAR_LEN);
+  for (int k = 0; k <= 12; k++) persist_delete(PK_RADAR_CHUNK0 + k);
+
+  // Restore the cached map so a reload never shows a blank screen.
   uint32_t mlen = 0;
   uint8_t *mask = persist_get(PK_MASK_LEN, PK_MASK_CHUNK0, PK_MASK_MAX, &mlen);
   if (mask) {
@@ -317,12 +316,6 @@ Layer *scene_create_layer(GRect frame) {
     uint8_t *b = rle_from_mask(mask, s_invert ? 0xFF : 0xC0, &blen);
     if (b) { s_base = b; s_base_len = blen; }
     free(mask);
-  }
-  uint32_t rlen = 0;
-  uint8_t *rbuf = persist_get(PK_RADAR_LEN, PK_RADAR_CHUNK0, PK_RADAR_MAX, &rlen);
-  if (rbuf) {
-    s_frames[0] = rbuf; s_frame_len[0] = rlen;
-    s_frame_count = 1; s_display_frame = 0;
   }
 
   layer_set_update_proc(s_layer, scene_update);
