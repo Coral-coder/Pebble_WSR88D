@@ -384,10 +384,9 @@ function runRefresh(c, loc, host, frames) {
 
     if (!needBase) { sendFrames(); return; }
 
-    buildBase(function (ok) {
-      if (!ok) { finish('Map offline'); return; }
-      sendFrames();
-    });
+    // Always refresh the radar, whether or not the map (re)loaded — a map
+    // fetch failure must never block the radar (or a scheme change).
+    buildBase(function () { sendFrames(); });
   });
 }
 
@@ -405,12 +404,9 @@ Pebble.addEventListener('appmessage', function (e) {
   if (p.SCR_W) dims.w = p.SCR_W;
   if (p.SCR_H) dims.h = p.SCR_H;
   // A request (launch or interval) refreshes radar; the map is only re-fetched
-  // if the view changed or we've moved >10% of the map width. On watch
-  // (re)start, force one full-res map so the cached half-res mask is upgraded.
-  if (typeof p.REQUEST !== 'undefined') {
-    if (p.REQUEST === REQ_HELLO) lastBase = null;
-    doRefresh();
-  }
+  // if the view changed or we've moved >10% of the map width. On reload the
+  // watch shows its cached map, so no forced map refetch here.
+  if (typeof p.REQUEST !== 'undefined') doRefresh();
 });
 
 Pebble.addEventListener('showConfiguration', function () {

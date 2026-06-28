@@ -1,8 +1,49 @@
 #include "scene.h"
 #include "wsr88d.h"
+#include "settings.h"
 
 #define ANIM_FRAME_MS 280   // dwell per frame while looping
 #define ANIM_HOLD_MS  900   // extra dwell on the newest frame at the end
+
+// Cache the base map across reloads. Persistent storage is only 4KB, so the
+// map is stored as a compact half-resolution 1-bit ink mask (~1KB). CRUCIAL:
+// the flash write is done from a timer, never inside the AppMessage handler —
+// synchronous flash writes there made the app go "not responding".
+#define PERSIST_CHUNK       256
+#define PK_MASK_LEN         200
+#define PK_MASK_CHUNK0      210
+#define PK_MASK_MAX         1200
+#define PERSIST_DELAY_MS    3000
+
+static bool persist_put(int len_key, int chunk0, const uint8_t *buf, uint32_t len) {
+  if (!buf || len == 0 || len > PK_MASK_MAX) { persist_delete(len_key); return false; }
+  uint32_t off = 0; int idx = 0;
+  while (off < len) {
+    uint32_t n = len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
+    if (persist_write_data(chunk0 + idx, buf + off, n) < (int)n) {
+      persist_delete(len_key); return false;
+    }
+    off += n; idx++;
+  }
+  persist_write_int(len_key, (int32_t)len);
+  return true;
+}
+
+static uint8_t *persist_get(int len_key, int chunk0, uint32_t *out) {
+  if (!persist_exists(len_key)) return NULL;
+  int32_t len = persist_read_int(len_key);
+  if (len <= 0 || (uint32_t)len > PK_MASK_MAX) return NULL;
+  uint8_t *buf = malloc(len);
+  if (!buf) return NULL;
+  uint32_t off = 0; int idx = 0;
+  while (off < (uint32_t)len) {
+    uint32_t n = (uint32_t)len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
+    if (persist_read_data(chunk0 + idx, buf + off, n) < (int)n) { free(buf); return NULL; }
+    off += n; idx++;
+  }
+  *out = (uint32_t)len;
+  return buf;
+}
 
 static Layer *s_layer;
 static int s_w, s_h;
@@ -19,6 +60,7 @@ static int8_t s_display_frame;   // frame index being drawn (-1 = none)
 static bool s_animating;
 static bool s_invert;            // black background when true
 static AppTimer *s_anim_timer;
+static AppTimer *s_persist_timer;
 
 // --- framebuffer pixel helpers -------------------------------------------
 
@@ -145,6 +187,72 @@ static void free_frames(void) {
   s_display_frame = -1;
 }
 
+// Build a half-res 1-bit ink mask from the current base RLE and persist it.
+static void persist_base_mask(void) {
+  if (!s_base || !s_base_len) return;
+  int hw = (s_w + 1) / 2, hh = (s_h + 1) / 2;
+  uint32_t mb = ((uint32_t)hw * hh + 7) / 8;
+  if (mb == 0 || mb > PK_MASK_MAX) { persist_delete(PK_MASK_LEN); return; }
+  uint8_t *mask = calloc(mb, 1);
+  if (!mask) { persist_delete(PK_MASK_LEN); return; }
+  uint8_t bg = s_invert ? 0xC0 : 0xFF;
+  uint32_t total = (uint32_t)s_w * s_h, p = 0, i = 0;
+  int x = 0, y = 0;
+  while (i + 3 <= s_base_len && p < total) {
+    uint16_t cnt = (uint16_t)s_base[i] | ((uint16_t)s_base[i + 1] << 8);
+    uint8_t col = s_base[i + 2]; i += 3;
+    if (col != WSR_TRANSPARENT && col != bg) {
+      for (uint16_t k = 0; k < cnt && p < total; k++, p++) {
+        uint32_t b = (uint32_t)(y >> 1) * hw + (x >> 1);
+        mask[b >> 3] |= (1 << (b & 7));
+        if (++x >= s_w) { x = 0; y++; }
+      }
+    } else {
+      uint32_t adv = cnt; if (p + adv > total) adv = total - p;
+      p += adv; uint32_t nx = (uint32_t)x + adv; y += nx / s_w; x = nx % s_w;
+    }
+  }
+  persist_put(PK_MASK_LEN, PK_MASK_CHUNK0, mask, mb);
+  free(mask);
+}
+
+// Expand a persisted half-res mask into a full-res base RLE (ink on transparent).
+static uint8_t *rle_from_mask(const uint8_t *mask, uint8_t ink, uint32_t *out_len) {
+  int hw = (s_w + 1) / 2;
+  uint32_t total = (uint32_t)s_w * s_h, p;
+  int x = 0, y = 0;
+  uint32_t runs = 0; uint8_t prev = 0; bool started = false;
+  for (p = 0; p < total; p++) {
+    uint32_t b = (uint32_t)(y >> 1) * hw + (x >> 1);
+    uint8_t col = ((mask[b >> 3] >> (b & 7)) & 1) ? ink : WSR_TRANSPARENT;
+    if (!started || col != prev) { runs++; prev = col; started = true; }
+    if (++x >= s_w) { x = 0; y++; }
+  }
+  if (runs == 0 || runs > 30000) return NULL;
+  uint8_t *buf = malloc(runs * 3);
+  if (!buf) return NULL;
+  uint32_t bi = 0, rc = 0; prev = 0; started = false; x = 0; y = 0;
+  for (p = 0; p < total; p++) {
+    uint32_t b = (uint32_t)(y >> 1) * hw + (x >> 1);
+    uint8_t col = ((mask[b >> 3] >> (b & 7)) & 1) ? ink : WSR_TRANSPARENT;
+    if (!started) { prev = col; rc = 1; started = true; }
+    else if (col == prev) { rc++; }
+    else {
+      buf[bi++] = rc & 0xff; buf[bi++] = (rc >> 8) & 0xff; buf[bi++] = prev;
+      prev = col; rc = 1;
+    }
+    if (++x >= s_w) { x = 0; y++; }
+  }
+  buf[bi++] = rc & 0xff; buf[bi++] = (rc >> 8) & 0xff; buf[bi++] = prev;
+  *out_len = bi;
+  return buf;
+}
+
+static void persist_timer_cb(void *ctx) {
+  s_persist_timer = NULL;
+  persist_base_mask();
+}
+
 void scene_set_base(uint8_t *rle, uint32_t len) {
   // Only replace the map when a complete new one arrives; never with nothing.
   if (!rle || len == 0) { if (rle) free(rle); return; }
@@ -152,6 +260,9 @@ void scene_set_base(uint8_t *rle, uint32_t len) {
   s_base = rle;
   s_base_len = len;
   if (s_layer) layer_mark_dirty(s_layer);
+  // Persist later, off the AppMessage handler (flash writes here stall it).
+  if (s_persist_timer) app_timer_cancel(s_persist_timer);
+  s_persist_timer = app_timer_register(PERSIST_DELAY_MS, persist_timer_cb, NULL);
 }
 
 void scene_begin_batch(uint8_t nframes) {
@@ -199,11 +310,24 @@ Layer *scene_create_layer(GRect frame) {
   s_ox = frame.origin.x;   // scene layer is a direct child of the root layer,
   s_oy = frame.origin.y;   // so its frame origin is its screen position
   s_display_frame = -1;
+  s_invert = settings_get()->invert;   // cached ink/bg must match the style
+
+  // Restore the cached map immediately so a reload never shows a blank screen.
+  uint32_t mlen = 0;
+  uint8_t *mask = persist_get(PK_MASK_LEN, PK_MASK_CHUNK0, &mlen);
+  if (mask) {
+    uint32_t blen = 0;
+    uint8_t *b = rle_from_mask(mask, s_invert ? 0xFF : 0xC0, &blen);
+    if (b) { s_base = b; s_base_len = blen; }
+    free(mask);
+  }
+
   layer_set_update_proc(s_layer, scene_update);
   return s_layer;
 }
 
 void scene_destroy(void) {
+  if (s_persist_timer) { app_timer_cancel(s_persist_timer); s_persist_timer = NULL; }
   if (s_anim_timer) { app_timer_cancel(s_anim_timer); s_anim_timer = NULL; }
   free_frames();
   if (s_base) { free(s_base); s_base = NULL; }
