@@ -67,6 +67,9 @@ var pending = false;
 // the view params change or the user moves >10% of the map width.
 var lastBase = null;             // { lat, lon, zoom, detail, style, w, h, url }
 var lastBaseRLE = null;          // the full-res map RLE, cached on the phone
+// Set on a watch/phone (re)launch: re-push the cached full-res map so the watch
+// upgrades from its low-res flash placeholder, even if the view is unchanged.
+var resendBase = false;
 
 // When we couldn't get a fresh map and are riding the cached one, retry the
 // map on this interval instead of waiting for the full update cycle.
@@ -348,6 +351,11 @@ function runRefresh(c, loc, host, frames) {
   var mpp = 156543.03 * Math.cos(loc.lat * Math.PI / 180) / Math.pow(2, zMap);
   var moved = sameView ? distanceM(lastBase.lat, lastBase.lon, loc.lat, loc.lon) : Infinity;
   var needBase = !sameView || moved > 0.10 * (W * mpp);
+  // If the view is unchanged but the watch just relaunched, re-push the crisp
+  // full-res map the phone cached (the watch's flash placeholder may be the
+  // blocky low-res fallback). One send, no refetch.
+  var doResend = !needBase && resendBase && !!lastBaseRLE;
+  resendBase = false;
 
   // Send a freshly-built base RLE to the watch and record it as the current map.
   function stashAndSendBase(rle, done) {
@@ -385,14 +393,19 @@ function runRefresh(c, loc, host, frames) {
   // DISPLAYED first (so a slow/failing map never delays it); the map is fetched
   // concurrently and streamed afterwards (sends can't interleave on the one
   // AppMessage channel). A timeout caps how long we wait on the map.
-  var baseRLE = null, baseFetchDone = !needBase, baseSent = false, radarDone = false;
+  var baseRLE = doResend ? lastBaseRLE : null;
+  var baseFetchDone = !needBase, baseSent = false, radarDone = false;
 
   function maybeSendBase() {
     if (!radarDone || !baseFetchDone || baseSent) return;
     baseSent = true;
-    if (baseRLE) {
+    if (baseRLE && needBase) {
       clearMapRetry();   // got a fresh map — no need to retry soon
       stashAndSendBase(baseRLE, function () { finish(null); });
+    } else if (baseRLE) {
+      // Re-push the cached full-res map (view unchanged) so the watch swaps its
+      // low-res placeholder for the crisp map. No re-stash/save needed.
+      transport.sendImage(IMG_KIND_BASE, 0, baseRLE, function () { finish(null); });
     } else {
       // Wanted a new map but rode the cached one — retry sooner than the
       // normal update cycle so a transient Overpass outage self-heals.
@@ -448,6 +461,7 @@ function runRefresh(c, loc, host, frames) {
 Pebble.addEventListener('ready', function () {
   sanitizeStoredSettings();
   loadBase();              // restore the phone-side map cache (skip needless refetch)
+  resendBase = true;       // re-push the crisp map on this fresh session
   syncSettingsToWatch();
   doRefresh();
   checkForUpdate();
@@ -458,8 +472,10 @@ Pebble.addEventListener('appmessage', function (e) {
   if (p.SCR_W) dims.w = p.SCR_W;
   if (p.SCR_H) dims.h = p.SCR_H;
   // A request (launch or interval) refreshes radar; the map is only re-fetched
-  // if the view changed or we've moved >10% of the map width. On reload the
-  // watch shows its cached map, so no forced map refetch here.
+  // if the view changed or we've moved >10% of the map width. A HELLO means the
+  // watchface just (re)launched — re-push the crisp full-res map so it replaces
+  // the low-res flash placeholder the watch loaded from its cache.
+  if (p.REQUEST === REQ_HELLO) resendBase = true;
   if (typeof p.REQUEST !== 'undefined') doRefresh();
 });
 
