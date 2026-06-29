@@ -45,17 +45,28 @@ jobs:
       - name: Install Pebble SDK (toolchain + platforms)
         run: pebble sdk install latest
 
-      - name: Build .pbw
+      - name: Build .pbw (watchface)
+        run: pebble build
+
+      - name: Build .pbw (KSC Weather app)
+        working-directory: weatherapp
         run: pebble build
 
       - name: Show build artifacts
-        run: ls -la build/
+        run: ls -la build/ weatherapp/build/
 
-      - name: Upload .pbw
+      - name: Upload .pbw (watchface)
         uses: actions/upload-artifact@v4
         with:
           name: wsr88d-radar
           path: build/*.pbw
+          if-no-files-found: error
+
+      - name: Upload .pbw (KSC Weather app)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksc-weather
+          path: weatherapp/build/*.pbw
           if-no-files-found: error
 
       # Publish a GitHub Release (marked "latest") with the .pbw on every push,
@@ -67,9 +78,12 @@ jobs:
           tag_name: b${{ github.run_number }}
           name: Build ${{ github.run_number }}
           make_latest: true
-          files: build/*.pbw
+          files: |
+            build/*.pbw
+            weatherapp/build/*.pbw
           body: |
             Automated build ${{ github.run_number }} (commit ${{ github.sha }}).
-            Install the attached `.pbw` via the Pebble app (Dev Connect, or open
-            the file). The watchface also offers a one-tap install from its
-            settings page when a newer build is available.
+            Two apps are attached: the **WSR-88D Radar** watchface and the
+            **KSC Weather** app. Install the `.pbw` files via the Pebble app
+            (Dev Connect, or open the file). The watchface also offers a one-tap
+            install from its settings page when a newer build is available.

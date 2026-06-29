@@ -1,0 +1,57 @@
+{
+  "name": "ksc-weather",
+  "author": "Coral Coder",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "keywords": [
+    "pebble-app"
+  ],
+  "dependencies": {},
+  "pebble": {
+    "displayName": "KSC Weather",
+    "uuid": "f8796f49-84f4-444a-a618-507510960081",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery",
+      "basalt",
+      "chalk",
+      "diorite"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "REQUEST",
+      "SCR_W",
+      "SCR_H",
+      "PIDX",
+      "PCOUNT",
+      "PINDEX",
+      "PTITLE",
+      "PKIND",
+      "TXT_TITLE",
+      "TXT_SEQ",
+      "TXT_NCHUNKS",
+      "TXT_DATA",
+      "IMG_KIND",
+      "IMG_SEQ",
+      "IMG_NCHUNKS",
+      "IMG_TOTAL",
+      "IMG_DATA",
+      "STATUS",
+      "ERR"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "IMAGE_MENU_ICON",
+          "file": "images/icon.png",
+          "menuIcon": true
+        }
+      ]
+    }
+  }
+}
