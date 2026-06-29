@@ -163,6 +163,12 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
         px = sx; py = sy;
       }
     }
+    // Guard: if essentially nothing was drawn (geometry off-view, or a result
+    // with no usable roads), treat it as a miss so we keep the cached map
+    // rather than shipping a near-blank one that would wipe the screen.
+    var inkPx = 0;
+    for (var q2 = 0; q2 < buf.length; q2++) { if (buf[q2]) inkPx++; }
+    if (inkPx < 30) return null;
     return render.encodeRLE(buf);
   }
 
@@ -181,8 +187,11 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
       try { els = (JSON.parse(xhr.responseText).elements) || []; }
       catch (ep) { next(); return; }
       if (!els.length) { next(); return; }   // flaky/empty mirror -> try another
-      try { cb(null, renderEls(els)); }
-      catch (er) { cb(er); }
+      var rle;
+      try { rle = renderEls(els); }
+      catch (er) { cb(er); return; }
+      if (!rle) { next(); return; }           // nothing usable drawn -> try another
+      cb(null, rle);
     };
     xhr.onerror = next;
     xhr.ontimeout = next;

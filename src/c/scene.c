@@ -293,7 +293,14 @@ static void persist_timer_cb(void *ctx) {
 
 void scene_set_base(uint8_t *rle, uint32_t len) {
   // Only replace the map when a complete new one arrives; never with nothing.
-  if (!rle || len == 0) { if (rle) free(rle); return; }
+  if (!rle || len < 3) { if (rle) free(rle); return; }
+  // Refuse a blank/all-transparent base: never wipe a good map with an empty
+  // one. If the incoming map has no ink at all, keep what we already have.
+  bool has_ink = false;
+  for (uint32_t i = 0; i + 3 <= len; i += 3) {
+    if (rle[i + 2] != WSR_TRANSPARENT) { has_ink = true; break; }
+  }
+  if (!has_ink) { free(rle); return; }
   if (s_base) free(s_base);
   s_base = rle;
   s_base_len = len;
