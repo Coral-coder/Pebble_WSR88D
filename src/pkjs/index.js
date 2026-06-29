@@ -89,14 +89,14 @@ function clearMapRetry() {
 // causes a needless Overpass round-trip and "Roads busy" on every relaunch).
 function saveBase(rle) {
   try {
-    localStorage.setItem('wsr_base', JSON.stringify({
+    localStorage.setItem('wsr_base_gs', JSON.stringify({
       meta: lastBase, rle: Array.prototype.slice.call(rle)
     }));
   } catch (e) { /* storage full / unavailable — fine, just won't persist */ }
 }
 function loadBase() {
   try {
-    var s = JSON.parse(localStorage.getItem('wsr_base'));
+    var s = JSON.parse(localStorage.getItem('wsr_base_gs'));
     if (s && s.meta) {
       lastBase = s.meta;
       lastBaseRLE = (s.rle && s.rle.length) ? s.rle : null;

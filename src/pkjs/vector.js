@@ -135,10 +135,22 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
     'relation["natural"="water"](' + bb + ');' +
     ');out geom;';
 
-  // Turn an Overpass element list into the bold-roads RLE.
+  // Grayscale hierarchy. Pebble has 4 true grays: black 0xC0, dark 0xD5,
+  // light 0xEA, white 0xFF. Major roads anchor in the strongest tone, arterials
+  // mid, minor faint, water a light fill — inverted on the dark style.
+  var dark = (ink === 0xFF);
+  function roadStyle(hw) {
+    if (hw === 'motorway' || hw === 'trunk') return dark ? [0xFF, 2] : [0xC0, 2];
+    if (hw === 'primary')                    return dark ? [0xEA, 2] : [0xD5, 2];
+    if (hw === 'secondary')                  return dark ? [0xEA, 1] : [0xD5, 1];
+    return dark ? [0xD5, 1] : [0xEA, 1];     // tertiary / residential / minor
+  }
+  var coastCol = dark ? 0xFF : 0xC0;         // coastline reads as a hard edge
+  var waterCol = dark ? 0xD5 : 0xEA;         // water body fill
+
+  // Turn an Overpass element list into the grayscale-roads RLE.
   function renderEls(els) {
     var buf = new Uint8Array(W * H);  // 0 = transparent
-    var water = ink === 0xFF ? 0xD5 : 0xEA;  // gray water fill
     var e, n, g, tags, pts;
     // Pass 1: fill water bodies (ways + relation outers) above the threshold.
     var polys = waterPolys(els, waterMinNodes(detail));
@@ -147,19 +159,25 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
       for (n = 0; n < g.length; n++) {
         pts.push([lonToX(g[n].lon, z) - tlx, latToY(g[n].lat, z) - tly]);
       }
-      fillPoly(buf, W, H, pts, water);
+      fillPoly(buf, W, H, pts, waterCol);
     }
-    // Pass 2: roads + coastline as thin lines on top.
-    for (e = 0; e < els.length; e++) {
-      tags = els[e].tags || {};
+    // Pass 2: roads + coastline as graded gray lines on top. Draw minor roads
+    // first so major roads paint over them at intersections.
+    var order = els.slice().sort(function (a, b) {
+      return roadStyle((a.tags || {}).highway)[1] - roadStyle((b.tags || {}).highway)[1];
+    });
+    for (e = 0; e < order.length; e++) {
+      tags = order[e].tags || {};
       if (tags.natural === 'water') continue;
-      g = els[e].geometry; if (!g || g.length < 2) continue;
-      var t = (tags.highway === 'motorway' || tags.highway === 'trunk') ? 2 : 1;
+      g = order[e].geometry; if (!g || g.length < 2) continue;
+      var col, t;
+      if (tags.natural === 'coastline') { col = coastCol; t = 1; }
+      else { var gs = roadStyle(tags.highway); col = gs[0]; t = gs[1]; }
       var px = null, py = null;
       for (n = 0; n < g.length; n++) {
         var sx = Math.round(lonToX(g[n].lon, z) - tlx);
         var sy = Math.round(latToY(g[n].lat, z) - tly);
-        if (px !== null) drawSeg(buf, W, H, px, py, sx, sy, ink, t);
+        if (px !== null) drawSeg(buf, W, H, px, py, sx, sy, col, t);
         px = sx; py = sy;
       }
     }
