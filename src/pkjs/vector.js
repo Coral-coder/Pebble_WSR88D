@@ -8,7 +8,16 @@
  */
 var render = require('./render.js');
 
-var OVERPASS = 'https://overpass-api.de/api/interpreter?data=';
+// Several public Overpass mirrors. The default instance is frequently busy or
+// rate-limited; trying mirrors in turn makes "Roads unavailable" (which leaves
+// nothing to cache) rare instead of common.
+var OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter?data=',
+  'https://overpass.kumi.systems/api/interpreter?data=',
+  'https://lz4.overpass-api.de/api/interpreter?data=',
+  'https://overpass.openstreetmap.fr/api/interpreter?data='
+];
+var OVERPASS_TIMEOUT = 12000;
 var TILE = 256;
 
 function lonToX(lon, z) { return (lon + 180) / 360 * Math.pow(2, z) * TILE; }
@@ -126,48 +135,60 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
     'relation["natural"="water"](' + bb + ');' +
     ');out geom;';
 
-  var xhr = new XMLHttpRequest();
-  xhr.open('GET', OVERPASS + encodeURIComponent(q), true);
-  xhr.timeout = 25000;
-  xhr.onload = function () {
-    if (xhr.status < 200 || xhr.status >= 300) { cb(new Error('HTTP ' + xhr.status)); return; }
-    try {
-      var data = JSON.parse(xhr.responseText);
-      var els = data.elements || [];
-      if (!els.length) { cb(new Error('empty')); return; }  // don't blank the map
-      var buf = new Uint8Array(W * H);  // 0 = transparent
-      var water = ink === 0xFF ? 0xD5 : 0xEA;  // gray water fill
-      var e, n, g, tags, pts;
+  // Turn an Overpass element list into the bold-roads RLE.
+  function renderEls(els) {
+    var buf = new Uint8Array(W * H);  // 0 = transparent
+    var water = ink === 0xFF ? 0xD5 : 0xEA;  // gray water fill
+    var e, n, g, tags, pts;
+    // Pass 1: fill water bodies (ways + relation outers) above the threshold.
+    var polys = waterPolys(els, waterMinNodes(detail));
+    for (e = 0; e < polys.length; e++) {
+      g = polys[e]; pts = [];
+      for (n = 0; n < g.length; n++) {
+        pts.push([lonToX(g[n].lon, z) - tlx, latToY(g[n].lat, z) - tly]);
+      }
+      fillPoly(buf, W, H, pts, water);
+    }
+    // Pass 2: roads + coastline as thin lines on top.
+    for (e = 0; e < els.length; e++) {
+      tags = els[e].tags || {};
+      if (tags.natural === 'water') continue;
+      g = els[e].geometry; if (!g || g.length < 2) continue;
+      var t = (tags.highway === 'motorway' || tags.highway === 'trunk') ? 2 : 1;
+      var px = null, py = null;
+      for (n = 0; n < g.length; n++) {
+        var sx = Math.round(lonToX(g[n].lon, z) - tlx);
+        var sy = Math.round(latToY(g[n].lat, z) - tly);
+        if (px !== null) drawSeg(buf, W, H, px, py, sx, sy, ink, t);
+        px = sx; py = sy;
+      }
+    }
+    return render.encodeRLE(buf);
+  }
 
-      // Pass 1: fill water bodies (ways + relation outers) above the threshold.
-      var polys = waterPolys(els, waterMinNodes(detail));
-      for (e = 0; e < polys.length; e++) {
-        g = polys[e]; pts = [];
-        for (n = 0; n < g.length; n++) {
-          pts.push([lonToX(g[n].lon, z) - tlx, latToY(g[n].lat, z) - tly]);
-        }
-        fillPoly(buf, W, H, pts, water);
-      }
-      // Pass 2: roads + coastline as thin lines on top.
-      for (e = 0; e < els.length; e++) {
-        tags = els[e].tags || {};
-        if (tags.natural === 'water') continue;
-        g = els[e].geometry; if (!g || g.length < 2) continue;
-        var t = (tags.highway === 'motorway' || tags.highway === 'trunk') ? 2 : 1;
-        var px = null, py = null;
-        for (n = 0; n < g.length; n++) {
-          var sx = Math.round(lonToX(g[n].lon, z) - tlx);
-          var sy = Math.round(latToY(g[n].lat, z) - tly);
-          if (px !== null) drawSeg(buf, W, H, px, py, sx, sy, ink, t);
-          px = sx; py = sy;
-        }
-      }
-      cb(null, render.encodeRLE(buf));
-    } catch (err) { cb(err); }
-  };
-  xhr.onerror = function () { cb(new Error('overpass network')); };
-  xhr.ontimeout = function () { cb(new Error('overpass timeout')); };
-  xhr.send();
+  // Try each mirror in turn; only give up (and keep the cached map) once every
+  // mirror has failed or returned nothing.
+  function attempt(i) {
+    if (i >= OVERPASS_MIRRORS.length) { cb(new Error('overpass unavailable')); return; }
+    var next = function () { attempt(i + 1); };
+    var xhr = new XMLHttpRequest();
+    try { xhr.open('GET', OVERPASS_MIRRORS[i] + encodeURIComponent(q), true); }
+    catch (eo) { next(); return; }
+    xhr.timeout = OVERPASS_TIMEOUT;
+    xhr.onload = function () {
+      if (xhr.status < 200 || xhr.status >= 300) { next(); return; }
+      var els;
+      try { els = (JSON.parse(xhr.responseText).elements) || []; }
+      catch (ep) { next(); return; }
+      if (!els.length) { next(); return; }   // flaky/empty mirror -> try another
+      try { cb(null, renderEls(els)); }
+      catch (er) { cb(er); }
+    };
+    xhr.onerror = next;
+    xhr.ontimeout = next;
+    try { xhr.send(); } catch (es) { next(); }
+  }
+  attempt(0);
 }
 
 module.exports = { buildRoadsRLE: buildRoadsRLE };

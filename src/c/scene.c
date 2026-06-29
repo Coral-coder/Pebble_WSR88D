@@ -13,41 +13,54 @@
 // quick-launch), so a long deferral meant the map was usually never cached and
 // every reload came up blank. Prompt write + write-on-unload fixes that.
 #define PERSIST_CHUNK       256
-#define PK_MASK_LEN         200
-#define PK_MASK_CHUNK0      210
-#define PK_MASK_MAX         1200
+#define PK_FMT_KEY          199   // stored cache format (see PK_FMT_*)
+#define PK_DATA_LEN         200   // stored data length in bytes
+#define PK_DATA_CHUNK0      210   // first data chunk key (uses up to 16 keys)
+#define PK_DATA_MAX         3584  // budget for the map (persist total is 4KB)
+#define PK_MASK_MAX         1200  // half-res mask is always well under this
+#define PK_FMT_NONE         0
+#define PK_FMT_MASK         1     // half-res 1-bit ink mask (lossy fallback)
+#define PK_FMT_RAW          2     // the exact base RLE (lossless, full quality)
 // Write the cache promptly (just off the AppMessage handler, to avoid the
 // synchronous-flash "not responding" stall) AND again on unload, so a map is
 // cached even if the watchface is open for under a second.
 #define PERSIST_DELAY_MS    300
 
-static bool persist_put(int len_key, int chunk0, const uint8_t *buf, uint32_t len) {
-  if (!buf || len == 0 || len > PK_MASK_MAX) { persist_delete(len_key); return false; }
+static void persist_clear(void) {
+  persist_delete(PK_FMT_KEY);
+  persist_delete(PK_DATA_LEN);
+  for (int k = 0; k < 16; k++) persist_delete(PK_DATA_CHUNK0 + k);
+}
+
+// Write len bytes across the data chunk keys. Returns false (without clearing)
+// if any chunk write is short — e.g. the 4KB persist budget was exceeded.
+static bool persist_write_chunks(const uint8_t *buf, uint32_t len) {
   uint32_t off = 0; int idx = 0;
   while (off < len) {
     uint32_t n = len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
-    if (persist_write_data(chunk0 + idx, buf + off, n) < (int)n) {
-      persist_delete(len_key); return false;
-    }
+    if (persist_write_data(PK_DATA_CHUNK0 + idx, buf + off, n) < (int)n) return false;
     off += n; idx++;
   }
-  persist_write_int(len_key, (int32_t)len);
   return true;
 }
 
-static uint8_t *persist_get(int len_key, int chunk0, uint32_t *out) {
-  if (!persist_exists(len_key)) return NULL;
-  int32_t len = persist_read_int(len_key);
-  if (len <= 0 || (uint32_t)len > PK_MASK_MAX) return NULL;
+// Read the stored cache blob (raw RLE or mask). *fmt/*out describe it.
+static uint8_t *persist_get(int *fmt, uint32_t *out) {
+  *fmt = PK_FMT_NONE; *out = 0;
+  if (!persist_exists(PK_FMT_KEY) || !persist_exists(PK_DATA_LEN)) return NULL;
+  int f = persist_read_int(PK_FMT_KEY);
+  if (f != PK_FMT_MASK && f != PK_FMT_RAW) return NULL;
+  int32_t len = persist_read_int(PK_DATA_LEN);
+  if (len <= 0 || (uint32_t)len > PK_DATA_MAX) return NULL;
   uint8_t *buf = malloc(len);
   if (!buf) return NULL;
   uint32_t off = 0; int idx = 0;
   while (off < (uint32_t)len) {
     uint32_t n = (uint32_t)len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
-    if (persist_read_data(chunk0 + idx, buf + off, n) < (int)n) { free(buf); return NULL; }
+    if (persist_read_data(PK_DATA_CHUNK0 + idx, buf + off, n) < (int)n) { free(buf); return NULL; }
     off += n; idx++;
   }
-  *out = (uint32_t)len;
+  *fmt = f; *out = (uint32_t)len;
   return buf;
 }
 
@@ -194,14 +207,25 @@ static void free_frames(void) {
   s_display_frame = -1;
 }
 
-// Build a half-res 1-bit ink mask from the current base RLE and persist it.
-static void persist_base_mask(void) {
+// Cache the base map. Prefer storing the EXACT base RLE (lossless, full
+// quality) when it fits the persist budget; only the densest maps fall back to
+// the compact half-res 1-bit ink mask. Either way the map is never lost.
+static void persist_base(void) {
   if (!s_base || !s_base_len) return;
+
+  // 1) Lossless: store the base RLE verbatim if it fits (and actually wrote).
+  if (s_base_len <= PK_DATA_MAX && persist_write_chunks(s_base, s_base_len)) {
+    persist_write_int(PK_DATA_LEN, (int32_t)s_base_len);
+    persist_write_int(PK_FMT_KEY, PK_FMT_RAW);
+    return;
+  }
+
+  // 2) Fallback: a half-res 1-bit ink mask (small, but blockier on rebuild).
   int hw = (s_w + 1) / 2, hh = (s_h + 1) / 2;
   uint32_t mb = ((uint32_t)hw * hh + 7) / 8;
-  if (mb == 0 || mb > PK_MASK_MAX) { persist_delete(PK_MASK_LEN); return; }
+  if (mb == 0 || mb > PK_MASK_MAX) { persist_clear(); return; }
   uint8_t *mask = calloc(mb, 1);
-  if (!mask) { persist_delete(PK_MASK_LEN); return; }
+  if (!mask) { persist_clear(); return; }
   uint8_t bg = s_invert ? 0xC0 : 0xFF;
   uint32_t total = (uint32_t)s_w * s_h, p = 0, i = 0;
   int x = 0, y = 0;
@@ -219,7 +243,12 @@ static void persist_base_mask(void) {
       p += adv; uint32_t nx = (uint32_t)x + adv; y += nx / s_w; x = nx % s_w;
     }
   }
-  persist_put(PK_MASK_LEN, PK_MASK_CHUNK0, mask, mb);
+  if (persist_write_chunks(mask, mb)) {
+    persist_write_int(PK_DATA_LEN, (int32_t)mb);
+    persist_write_int(PK_FMT_KEY, PK_FMT_MASK);
+  } else {
+    persist_clear();
+  }
   free(mask);
 }
 
@@ -258,7 +287,7 @@ static uint8_t *rle_from_mask(const uint8_t *mask, uint8_t ink, uint32_t *out_le
 static void persist_timer_cb(void *ctx) {
   s_persist_timer = NULL;
   if (!s_base_dirty) return;
-  persist_base_mask();
+  persist_base();
   s_base_dirty = false;
 }
 
@@ -324,13 +353,18 @@ Layer *scene_create_layer(GRect frame) {
   s_invert = settings_get()->invert;   // cached ink/bg must match the style
 
   // Restore the cached map immediately so a reload never shows a blank screen.
-  uint32_t mlen = 0;
-  uint8_t *mask = persist_get(PK_MASK_LEN, PK_MASK_CHUNK0, &mlen);
-  if (mask) {
-    uint32_t blen = 0;
-    uint8_t *b = rle_from_mask(mask, s_invert ? 0xFF : 0xC0, &blen);
-    if (b) { s_base = b; s_base_len = blen; }
-    free(mask);
+  int fmt = PK_FMT_NONE; uint32_t dlen = 0;
+  uint8_t *data = persist_get(&fmt, &dlen);
+  if (data) {
+    if (fmt == PK_FMT_RAW) {
+      // The exact base RLE — use it directly (full quality, no rebuild).
+      s_base = data; s_base_len = dlen;
+    } else {  // PK_FMT_MASK: expand the half-res mask back to a full-res RLE.
+      uint32_t blen = 0;
+      uint8_t *b = rle_from_mask(data, s_invert ? 0xFF : 0xC0, &blen);
+      if (b) { s_base = b; s_base_len = blen; }
+      free(data);
+    }
   }
 
   layer_set_update_proc(s_layer, scene_update);
@@ -342,7 +376,7 @@ void scene_destroy(void) {
   // Guarantee the latest map is cached before we exit, so the next launch
   // redraws it instantly instead of showing a blank screen. (Safe here: this
   // is the unload path, not the AppMessage handler.)
-  if (s_base_dirty) { persist_base_mask(); s_base_dirty = false; }
+  if (s_base_dirty) { persist_base(); s_base_dirty = false; }
   if (s_anim_timer) { app_timer_cancel(s_anim_timer); s_anim_timer = NULL; }
   free_frames();
   if (s_base) { free(s_base); s_base = NULL; }
