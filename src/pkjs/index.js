@@ -58,6 +58,7 @@ var RADAR_INDEX_URL = 'https://api.rainviewer.com/public/weather-maps.json';
 var WX_URL = 'https://api.open-meteo.com/v1/forecast';
 var RADAR_ALPHA_MIN = 40;
 var RADAR_MAX_ZOOM = 7;          // RainViewer tile cap
+var MAP_BUILD_TIMEOUT = 35000;   // give up waiting on the map (radar still ships)
 
 var dims = { w: 200, h: 164 };   // updated from the watch's SCR_W/SCR_H
 var busy = false;
@@ -314,6 +315,7 @@ function runRefresh(c, loc, host, frames) {
   var moved = sameView ? distanceM(lastBase.lat, lastBase.lon, loc.lat, loc.lon) : Infinity;
   var needBase = !sameView || moved > 0.10 * (W * mpp);
 
+  // Send a freshly-built base RLE to the watch and record it as the current map.
   function stashAndSendBase(rle, done) {
     pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
     lastBase = { lat: loc.lat, lon: loc.lon, zoom: zMap, detail: c.detail,
@@ -321,73 +323,80 @@ function runRefresh(c, loc, host, frames) {
     transport.sendImage(IMG_KIND_BASE, 0, rle, function () { done(true); });
   }
 
-  // Build the base map via raster tiles (Voyager/Toner/custom) at `mode`.
-  function buildRaster(url, mode, done) {
-    var mapFn = function (tx, ty, zz) {
-      return url.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
-    };
-    tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
-      function (err, view, ok) {
-        if (!ok) { done(false); return; }
-        stashAndSendBase(render.mapToRLE(view, W, H, mode), done);
-      });
-  }
-
-  function buildBase(done) {
+  // Fetch the base map (network only — does NOT send). cb(rleUint8 | null);
+  // null means "no usable map" and the watch keeps its cached one.
+  function fetchBaseRLE(cb) {
     if (isVector) {
       sendStatus('Loading map...');
       var ink = c.style === 5 ? 0xFF : 0xC0;
       vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink, c.detail,
         function (err, rle) {
-          if (err || !rle) {
-            // Roads fetch failed. NEVER send the noisy quantized-raster
-            // fallback — it would overwrite the watch's good cached map with
-            // garbage. Send nothing; the watch keeps whatever clean map it has
-            // cached, and the Overpass mirrors almost always succeed next time.
-            sendStatus('Roads busy — kept cached map');
-            done(false);
-            return;
-          }
-          stashAndSendBase(rle, done);
+          if (err || !rle) { sendStatus('Roads busy — kept cached map'); cb(null); return; }
+          cb(rle);
         });
     } else {
-      buildRaster(plan.url, plan.mode, done);
+      var mapFn = function (tx, ty, zz) {
+        return plan.url.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
+      };
+      tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
+        function (err, view, ok) {
+          cb(ok ? render.mapToRLE(view, W, H, plan.mode) : null);
+        });
     }
+  }
+
+  // Radar and map load in PARALLEL. The radar is fetched, streamed, and
+  // DISPLAYED first (so a slow/failing map never delays it); the map is fetched
+  // concurrently and streamed afterwards (sends can't interleave on the one
+  // AppMessage channel). A timeout caps how long we wait on the map.
+  var baseRLE = null, baseFetchDone = !needBase, baseSent = false, radarDone = false;
+
+  function maybeSendBase() {
+    if (!radarDone || !baseFetchDone || baseSent) return;
+    baseSent = true;
+    if (baseRLE) stashAndSendBase(baseRLE, function () { finish(null); });
+    else finish(null);   // no new map — watch keeps its cached one
+  }
+
+  if (needBase) {
+    fetchBaseRLE(function (rle) {
+      if (baseSent) return;                 // map arrived after we gave up
+      baseRLE = rle; baseFetchDone = true; maybeSendBase();
+    });
+    setTimeout(function () {                 // don't wait forever on the map
+      if (!baseFetchDone && !baseSent) {
+        sendStatus('Map slow — kept cached map');
+        baseFetchDone = true; baseRLE = null; maybeSendBase();
+      }
+    }, MAP_BUILD_TIMEOUT);
+  }
+
+  function sendFrames(whenDone) {
+    var items = frames.map(function (f, i) { return { f: f, i: i }; });
+    tiles.series(items, function (item, next) {
+      var f = item.f;
+      var urlFn = function (tx, ty, zz) {
+        return host + f.path + '/256/' + zz + '/' + tx + '/' + ty + '/' +
+               c.scheme + '/' + c.smooth + '_' + c.snow + '.png';
+      };
+      tiles.buildViewport(loc.lat, loc.lon, zMap, zRad, W, H, urlFn,
+        function (err, view) {
+          var rle = render.radarToRLE(view, W, H, RADAR_ALPHA_MIN);
+          if (item.i === nframes - 1) pv.radar = Array.prototype.slice.call(rle);
+          transport.sendImage(IMG_KIND_RADAR, item.i, rle, function () { next(null); });
+        });
+    }, whenDone);
   }
 
   transport.sendDict({ BATCH: 1, NFRAMES: nframes }, function (e) {
     if (e) { finish('Link error'); return; }
-
-    function sendFrames() {
-      var items = frames.map(function (f, i) { return { f: f, i: i }; });
-      tiles.series(items, function (item, next) {
-        var f = item.f;
-        var urlFn = function (tx, ty, zz) {
-          return host + f.path + '/256/' + zz + '/' + tx + '/' + ty + '/' +
-                 c.scheme + '/' + c.smooth + '_' + c.snow + '.png';
-        };
-        tiles.buildViewport(loc.lat, loc.lon, zMap, zRad, W, H, urlFn,
-          function (err, view) {
-            var rle = render.radarToRLE(view, W, H, RADAR_ALPHA_MIN);
-            if (item.i === nframes - 1) {     // newest frame -> preview
-              pv.radar = Array.prototype.slice.call(rle);
-            }
-            transport.sendImage(IMG_KIND_RADAR, item.i, rle, function () {
-              next(null);
-            });
-          });
-      }, function () {
-        pv.scan = scanLabel(frames[nframes - 1].time, loc.lat, c);
-        transport.sendDict({ BATCH: 0, STATUS: pv.scan },
-          function () { finish(null); });
+    sendFrames(function () {
+      pv.scan = scanLabel(frames[nframes - 1].time, loc.lat, c);
+      transport.sendDict({ BATCH: 0, STATUS: pv.scan }, function () {
+        radarDone = true;   // radar is now on screen over the (cached) map
+        maybeSendBase();    // ship the fresh map if it finished loading
       });
-    }
-
-    if (!needBase) { sendFrames(); return; }
-
-    // Always refresh the radar, whether or not the map (re)loaded — a map
-    // fetch failure must never block the radar (or a scheme change).
-    buildBase(function () { sendFrames(); });
+    });
   });
 }
 

@@ -17,7 +17,7 @@ var OVERPASS_MIRRORS = [
   'https://lz4.overpass-api.de/api/interpreter?data=',
   'https://overpass.openstreetmap.fr/api/interpreter?data='
 ];
-var OVERPASS_TIMEOUT = 12000;
+var OVERPASS_TIMEOUT = 10000;   // per-mirror; several mirrors tried in turn
 var TILE = 256;
 
 function lonToX(lon, z) { return (lon + 180) / 360 * Math.pow(2, z) * TILE; }
