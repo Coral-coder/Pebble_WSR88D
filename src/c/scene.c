@@ -6,14 +6,20 @@
 #define ANIM_HOLD_MS  900   // extra dwell on the newest frame at the end
 
 // Cache the base map across reloads. Persistent storage is only 4KB, so the
-// map is stored as a compact half-resolution 1-bit ink mask (~1KB). CRUCIAL:
-// the flash write is done from a timer, never inside the AppMessage handler —
-// synchronous flash writes there made the app go "not responding".
+// map is stored as a compact half-resolution 1-bit ink mask (~1KB). The flash
+// write is kept OUT of the AppMessage handler (synchronous flash writes there
+// made the app go "not responding") via a short timer, and is ALSO forced on
+// unload — a watchface is unloaded constantly (notifications, wrist-down, menu,
+// quick-launch), so a long deferral meant the map was usually never cached and
+// every reload came up blank. Prompt write + write-on-unload fixes that.
 #define PERSIST_CHUNK       256
 #define PK_MASK_LEN         200
 #define PK_MASK_CHUNK0      210
 #define PK_MASK_MAX         1200
-#define PERSIST_DELAY_MS    3000
+// Write the cache promptly (just off the AppMessage handler, to avoid the
+// synchronous-flash "not responding" stall) AND again on unload, so a map is
+// cached even if the watchface is open for under a second.
+#define PERSIST_DELAY_MS    300
 
 static bool persist_put(int len_key, int chunk0, const uint8_t *buf, uint32_t len) {
   if (!buf || len == 0 || len > PK_MASK_MAX) { persist_delete(len_key); return false; }
@@ -61,6 +67,7 @@ static bool s_animating;
 static bool s_invert;            // black background when true
 static AppTimer *s_anim_timer;
 static AppTimer *s_persist_timer;
+static bool s_base_dirty;        // base changed but not yet written to flash
 
 // --- framebuffer pixel helpers -------------------------------------------
 
@@ -250,7 +257,9 @@ static uint8_t *rle_from_mask(const uint8_t *mask, uint8_t ink, uint32_t *out_le
 
 static void persist_timer_cb(void *ctx) {
   s_persist_timer = NULL;
+  if (!s_base_dirty) return;
   persist_base_mask();
+  s_base_dirty = false;
 }
 
 void scene_set_base(uint8_t *rle, uint32_t len) {
@@ -259,8 +268,10 @@ void scene_set_base(uint8_t *rle, uint32_t len) {
   if (s_base) free(s_base);
   s_base = rle;
   s_base_len = len;
+  s_base_dirty = true;
   if (s_layer) layer_mark_dirty(s_layer);
-  // Persist later, off the AppMessage handler (flash writes here stall it).
+  // Persist shortly, off the AppMessage handler (synchronous flash writes here
+  // stalled the app). The unload path is the backstop if we exit before this.
   if (s_persist_timer) app_timer_cancel(s_persist_timer);
   s_persist_timer = app_timer_register(PERSIST_DELAY_MS, persist_timer_cb, NULL);
 }
@@ -328,6 +339,10 @@ Layer *scene_create_layer(GRect frame) {
 
 void scene_destroy(void) {
   if (s_persist_timer) { app_timer_cancel(s_persist_timer); s_persist_timer = NULL; }
+  // Guarantee the latest map is cached before we exit, so the next launch
+  // redraws it instantly instead of showing a blank screen. (Safe here: this
+  // is the unload path, not the AppMessage handler.)
+  if (s_base_dirty) { persist_base_mask(); s_base_dirty = false; }
   if (s_anim_timer) { app_timer_cancel(s_anim_timer); s_anim_timer = NULL; }
   free_frames();
   if (s_base) { free(s_base); s_base = NULL; }
