@@ -340,11 +340,12 @@ function runRefresh(c, loc, host, frames) {
       vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink, c.detail,
         function (err, rle) {
           if (err || !rle) {
-            // Keep the existing good map rather than blanking it; only fall
-            // back to a raster map if we've never drawn one yet.
-            if (lastBase) { done(true); return; }
-            sendStatus('Roads unavailable');
-            buildRaster(mapPlan({ style: 1, detail: c.detail }).url, 'hc', done);
+            // Roads fetch failed. NEVER send the noisy quantized-raster
+            // fallback — it would overwrite the watch's good cached map with
+            // garbage. Send nothing; the watch keeps whatever clean map it has
+            // cached, and the Overpass mirrors almost always succeed next time.
+            sendStatus('Roads busy — kept cached map');
+            done(false);
             return;
           }
           stashAndSendBase(rle, done);
