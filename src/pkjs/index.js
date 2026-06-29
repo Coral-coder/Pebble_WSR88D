@@ -65,7 +65,41 @@ var busy = false;
 var pending = false;
 // Identity of the map currently on the watch; the map is only re-fetched when
 // the view params change or the user moves >10% of the map width.
-var lastBase = null;             // { lat, lon, zoom, detail, style, w, h }
+var lastBase = null;             // { lat, lon, zoom, detail, style, w, h, url }
+var lastBaseRLE = null;          // the full-res map RLE, cached on the phone
+
+// When we couldn't get a fresh map and are riding the cached one, retry the
+// map on this interval instead of waiting for the full update cycle.
+var MAP_RETRY_MS = 5 * 60 * 1000;
+var mapRetryTimer = null;
+
+function scheduleMapRetry() {
+  if (mapRetryTimer) clearTimeout(mapRetryTimer);
+  mapRetryTimer = setTimeout(function () { mapRetryTimer = null; doRefresh(); }, MAP_RETRY_MS);
+}
+function clearMapRetry() {
+  if (mapRetryTimer) { clearTimeout(mapRetryTimer); mapRetryTimer = null; }
+}
+
+// Persist the last good map (full-res RLE + view identity) on the phone so a
+// PebbleKit-JS reload doesn't re-fetch an unchanged view (which otherwise
+// causes a needless Overpass round-trip and "Roads busy" on every relaunch).
+function saveBase(rle) {
+  try {
+    localStorage.setItem('wsr_base', JSON.stringify({
+      meta: lastBase, rle: Array.prototype.slice.call(rle)
+    }));
+  } catch (e) { /* storage full / unavailable — fine, just won't persist */ }
+}
+function loadBase() {
+  try {
+    var s = JSON.parse(localStorage.getItem('wsr_base'));
+    if (s && s.meta) {
+      lastBase = s.meta;
+      lastBaseRLE = (s.rle && s.rle.length) ? s.rle : null;
+    }
+  } catch (e) { lastBase = null; lastBaseRLE = null; }
+}
 
 function distanceM(lat1, lon1, lat2, lon2) {
   var R = 6371000, rad = Math.PI / 180;
@@ -320,6 +354,8 @@ function runRefresh(c, loc, host, frames) {
     pv.w = W; pv.h = H; pv.base = Array.prototype.slice.call(rle);
     lastBase = { lat: loc.lat, lon: loc.lon, zoom: zMap, detail: c.detail,
                  style: c.style, w: W, h: H, url: plan.url };
+    lastBaseRLE = pv.base;
+    saveBase(rle);                       // cache the full-res map on the phone
     transport.sendImage(IMG_KIND_BASE, 0, rle, function () { done(true); });
   }
 
@@ -354,8 +390,15 @@ function runRefresh(c, loc, host, frames) {
   function maybeSendBase() {
     if (!radarDone || !baseFetchDone || baseSent) return;
     baseSent = true;
-    if (baseRLE) stashAndSendBase(baseRLE, function () { finish(null); });
-    else finish(null);   // no new map — watch keeps its cached one
+    if (baseRLE) {
+      clearMapRetry();   // got a fresh map — no need to retry soon
+      stashAndSendBase(baseRLE, function () { finish(null); });
+    } else {
+      // Wanted a new map but rode the cached one — retry sooner than the
+      // normal update cycle so a transient Overpass outage self-heals.
+      if (needBase) scheduleMapRetry();
+      finish(null);
+    }
   }
 
   if (needBase) {
@@ -404,6 +447,7 @@ function runRefresh(c, loc, host, frames) {
 
 Pebble.addEventListener('ready', function () {
   sanitizeStoredSettings();
+  loadBase();              // restore the phone-side map cache (skip needless refetch)
   syncSettingsToWatch();
   doRefresh();
   checkForUpdate();
