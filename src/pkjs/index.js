@@ -439,14 +439,9 @@ Pebble.addEventListener('webviewclosed', function (e) {
   // manipulators on the next open and breaks getConfig()). It also returns the
   // parsed settings, which carry the KEEP_OPEN flag set by the Save/Exit
   // buttons in the settings page.
-  var s = clay.getSettings(e.response) || {};
+  clay.getSettings(e.response);
   syncSettingsToWatch();
   // The map re-fetches only if style/detail/zoom actually changed (handled by
   // the view check in runRefresh); scheme/units changes just update the radar.
   doRefresh();
-  // "Save" (KEEP_OPEN = 1) applies the settings but re-opens the config so the
-  // user can keep adjusting without leaving; "Exit" (0) just closes.
-  if (s.KEEP_OPEN === '1' || s.KEEP_OPEN === 1) {
-    try { openConfig(); } catch (e2) {}
-  }
 });

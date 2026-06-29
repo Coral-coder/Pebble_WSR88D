@@ -264,44 +264,22 @@ module.exports = function (minified) {
       main.style.cssText = 'width:150px;height:171px;border:3px solid #444;border-radius:14px;background:#000;flex:0 0 auto;';
 
       var col = doc.createElement('div');
-      col.style.cssText = 'display:flex;flex-direction:column;align-items:stretch;gap:8px;';
+      col.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;';
       var cap = doc.createElement('div');
       cap.textContent = 'LIVE PREVIEW';
-      cap.style.cssText = 'color:#888;font:600 11px sans-serif;letter-spacing:.1em;text-align:center;';
-
-      // Submit, flagging whether to keep the settings page open afterward.
-      // The preview already updates as you change options, so you can look
-      // without committing; Save applies + stays here, Exit applies + closes.
-      function submitWith(keepOpen) {
-        try {
-          var it = clayConfig.getItemByMessageKey('KEEP_OPEN');
-          if (it && it.set) it.set(keepOpen ? '1' : '0');
-        } catch (e) {}
+      cap.style.cssText = 'color:#888;font:600 11px sans-serif;letter-spacing:.1em;';
+      var saveBtn = doc.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.textContent = 'Save';
+      saveBtn.style.cssText = 'padding:12px 26px;border:0;border-radius:9px;' +
+        'background:#1f8f4f;color:#fff;font:700 15px sans-serif;cursor:pointer;';
+      saveBtn.onclick = function () {
         try {
           var rs = doc.querySelector('input[type="submit"], button[type="submit"]');
           if (rs) rs.click();
         } catch (e) {}
-      }
-
-      var saveBtn = doc.createElement('button');
-      saveBtn.type = 'button';
-      saveBtn.textContent = 'Save';
-      saveBtn.style.cssText = 'padding:11px 22px;border:0;border-radius:9px;' +
-        'background:#1f8f4f;color:#fff;font:700 15px sans-serif;cursor:pointer;';
-      saveBtn.onclick = function () { submitWith(true); };
-
-      var exitBtn = doc.createElement('button');
-      exitBtn.type = 'button';
-      exitBtn.textContent = 'Exit';
-      exitBtn.style.cssText = 'padding:9px 22px;border:1px solid #555;border-radius:9px;' +
-        'background:#2a2a2d;color:#ddd;font:600 14px sans-serif;cursor:pointer;';
-      exitBtn.onclick = function () { submitWith(false); };
-
-      var hint = doc.createElement('div');
-      hint.textContent = 'Save keeps this open · Exit closes';
-      hint.style.cssText = 'color:#666;font:500 9px sans-serif;text-align:center;';
-
-      col.appendChild(cap); col.appendChild(saveBtn); col.appendChild(exitBtn); col.appendChild(hint);
+      };
+      col.appendChild(cap); col.appendChild(saveBtn);
       holder.appendChild(main); holder.appendChild(col);
 
       var root = (clayConfig.$rootContainer &&
@@ -318,9 +296,6 @@ module.exports = function (minified) {
           if (wrap !== holder) wrap.style.display = 'none';
         }
       } catch (e) {}
-
-      // The KEEP_OPEN flag is an implementation detail of the buttons above.
-      try { var ko = clayConfig.getItemByMessageKey('KEEP_OPEN'); if (ko && ko.hide) ko.hide(); } catch (e) {}
 
       mapc = doc.createElement('canvas'); mapc.width = Wd; mapc.height = MAPH;
 

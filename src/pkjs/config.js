@@ -87,11 +87,5 @@ module.exports = [
       { "label": "60 minutes", "value": 60 }
     ] },
 
-  // Hidden flag set by the sticky bar's buttons before submit: "1" = Save
-  // (apply and keep the settings page open), "0" = Exit (apply and close).
-  // Hidden from the form by the live-preview customFn.
-  { "type": "input", "messageKey": "KEEP_OPEN", "defaultValue": "0",
-    "attributes": { "type": "hidden" } },
-
   { "type": "submit", "defaultValue": "Save" }
 ];
