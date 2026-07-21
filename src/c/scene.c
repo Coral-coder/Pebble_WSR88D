@@ -5,22 +5,30 @@
 #define ANIM_FRAME_MS 280   // dwell per frame while looping
 #define ANIM_HOLD_MS  900   // extra dwell on the newest frame at the end
 
-// Cache the base map across reloads. Persistent storage is only 4KB, so the
-// map is stored as a compact half-resolution 1-bit ink mask (~1KB). The flash
-// write is kept OUT of the AppMessage handler (synchronous flash writes there
-// made the app go "not responding") via a short timer, and is ALSO forced on
-// unload — a watchface is unloaded constantly (notifications, wrist-down, menu,
-// quick-launch), so a long deferral meant the map was usually never cached and
-// every reload came up blank. Prompt write + write-on-unload fixes that.
+// Cache the base map AND the newest radar frame across reloads. Persistent
+// storage is only 4KB total: the map is stored losslessly when it fits (else
+// as a half-res 1-bit mask), the radar best-effort in the leftover budget.
+// Flash writes are kept OUT of the AppMessage handler (synchronous flash
+// writes there made the app go "not responding") via a short timer, and ALSO
+// forced on unload — a watchface is unloaded constantly (notifications,
+// wrist-down, menu, quick-launch), so a long deferral meant the cache was
+// usually never written and every reload came up blank.
 #define PERSIST_CHUNK       256
-#define PK_FMT_KEY          199   // stored cache format (see PK_FMT_*)
-#define PK_DATA_LEN         200   // stored data length in bytes
-#define PK_DATA_CHUNK0      210   // first data chunk key (uses up to 16 keys)
+#define PK_FMT_KEY          199   // stored map format (see PK_FMT_*)
+#define PK_DATA_LEN         200   // stored map length in bytes
+#define PK_DATA_CHUNK0      210   // first map chunk key (uses up to 16 keys)
 #define PK_DATA_MAX         3584  // budget for the map (persist total is 4KB)
 #define PK_MASK_MAX         1200  // half-res mask is always well under this
 #define PK_FMT_NONE         0
 #define PK_FMT_MASK         1     // half-res 1-bit ink mask (lossy fallback)
 #define PK_FMT_RAW          2     // the exact base RLE (lossless, full quality)
+// Newest radar frame, cached best-effort in whatever budget the map left over.
+// Light-precip frames RLE-compress to well under this; a stormy frame that
+// doesn't fit simply isn't persisted (the phone re-pushes it on launch anyway).
+#define RK_LEN              240   // stored radar length in bytes
+#define RK_CHUNK0           241   // first radar chunk key (uses up to 6 keys)
+#define RK_NKEYS            6
+#define RK_MAX              (RK_NKEYS * PERSIST_CHUNK)
 // Write the cache promptly (just off the AppMessage handler, to avoid the
 // synchronous-flash "not responding" stall) AND again on unload, so a map is
 // cached even if the watchface is open for under a second.
@@ -32,35 +40,50 @@ static void persist_clear(void) {
   for (int k = 0; k < 16; k++) persist_delete(PK_DATA_CHUNK0 + k);
 }
 
-// Write len bytes across the data chunk keys. Returns false (without clearing)
-// if any chunk write is short — e.g. the 4KB persist budget was exceeded.
-static bool persist_write_chunks(const uint8_t *buf, uint32_t len) {
+static void radar_persist_clear(void) {
+  persist_delete(RK_LEN);
+  for (int k = 0; k < RK_NKEYS; k++) persist_delete(RK_CHUNK0 + k);
+}
+
+// Write len bytes across chunk keys starting at chunk0. Returns false (without
+// clearing) if any chunk write is short — e.g. the 4KB persist budget ran out.
+static bool persist_write_chunks(int chunk0, const uint8_t *buf, uint32_t len) {
   uint32_t off = 0; int idx = 0;
   while (off < len) {
     uint32_t n = len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
-    if (persist_write_data(PK_DATA_CHUNK0 + idx, buf + off, n) < (int)n) return false;
+    if (persist_write_data(chunk0 + idx, buf + off, n) < (int)n) return false;
     off += n; idx++;
   }
   return true;
 }
 
-// Read the stored cache blob (raw RLE or mask). *fmt/*out describe it.
-static uint8_t *persist_get(int *fmt, uint32_t *out) {
-  *fmt = PK_FMT_NONE; *out = 0;
-  if (!persist_exists(PK_FMT_KEY) || !persist_exists(PK_DATA_LEN)) return NULL;
-  int f = persist_read_int(PK_FMT_KEY);
-  if (f != PK_FMT_MASK && f != PK_FMT_RAW) return NULL;
-  int32_t len = persist_read_int(PK_DATA_LEN);
-  if (len <= 0 || (uint32_t)len > PK_DATA_MAX) return NULL;
+// Read a chunked blob whose byte length is stored at len_key. NULL on any miss.
+static uint8_t *persist_read_chunks(int len_key, int chunk0, uint32_t cap,
+                                    uint32_t *out) {
+  *out = 0;
+  if (!persist_exists(len_key)) return NULL;
+  int32_t len = persist_read_int(len_key);
+  if (len <= 0 || (uint32_t)len > cap) return NULL;
   uint8_t *buf = malloc(len);
   if (!buf) return NULL;
   uint32_t off = 0; int idx = 0;
   while (off < (uint32_t)len) {
     uint32_t n = (uint32_t)len - off; if (n > PERSIST_CHUNK) n = PERSIST_CHUNK;
-    if (persist_read_data(PK_DATA_CHUNK0 + idx, buf + off, n) < (int)n) { free(buf); return NULL; }
+    if (persist_read_data(chunk0 + idx, buf + off, n) < (int)n) { free(buf); return NULL; }
     off += n; idx++;
   }
-  *fmt = f; *out = (uint32_t)len;
+  *out = (uint32_t)len;
+  return buf;
+}
+
+// Read the stored map blob (raw RLE or mask). *fmt/*out describe it.
+static uint8_t *persist_get(int *fmt, uint32_t *out) {
+  *fmt = PK_FMT_NONE; *out = 0;
+  if (!persist_exists(PK_FMT_KEY)) return NULL;
+  int f = persist_read_int(PK_FMT_KEY);
+  if (f != PK_FMT_MASK && f != PK_FMT_RAW) return NULL;
+  uint8_t *buf = persist_read_chunks(PK_DATA_LEN, PK_DATA_CHUNK0, PK_DATA_MAX, out);
+  if (buf) *fmt = f;
   return buf;
 }
 
@@ -81,6 +104,8 @@ static bool s_invert;            // black background when true
 static AppTimer *s_anim_timer;
 static AppTimer *s_persist_timer;
 static bool s_base_dirty;        // base changed but not yet written to flash
+static bool s_radar_dirty;       // newest radar changed but not yet written
+static uint8_t s_incoming_max;   // frames received in the current batch
 
 // --- framebuffer pixel helpers -------------------------------------------
 
@@ -214,7 +239,8 @@ static void persist_base(void) {
   if (!s_base || !s_base_len) return;
 
   // 1) Lossless: store the base RLE verbatim if it fits (and actually wrote).
-  if (s_base_len <= PK_DATA_MAX && persist_write_chunks(s_base, s_base_len)) {
+  if (s_base_len <= PK_DATA_MAX &&
+      persist_write_chunks(PK_DATA_CHUNK0, s_base, s_base_len)) {
     persist_write_int(PK_DATA_LEN, (int32_t)s_base_len);
     persist_write_int(PK_FMT_KEY, PK_FMT_RAW);
     return;
@@ -243,13 +269,28 @@ static void persist_base(void) {
       p += adv; uint32_t nx = (uint32_t)x + adv; y += nx / s_w; x = nx % s_w;
     }
   }
-  if (persist_write_chunks(mask, mb)) {
+  if (persist_write_chunks(PK_DATA_CHUNK0, mask, mb)) {
     persist_write_int(PK_DATA_LEN, (int32_t)mb);
     persist_write_int(PK_FMT_KEY, PK_FMT_MASK);
   } else {
     persist_clear();
   }
   free(mask);
+}
+
+// Cache the newest radar frame, best-effort: only if it fits the small radar
+// keyspace AND the persist budget has room after the map. A failed write just
+// clears the radar cache — the phone re-pushes the frame on launch regardless.
+static void persist_radar(void) {
+  if (s_frame_count == 0) { radar_persist_clear(); return; }
+  uint8_t *rle = s_frames[s_frame_count - 1];
+  uint32_t len = s_frame_len[s_frame_count - 1];
+  if (!rle || len == 0 || len > RK_MAX) { radar_persist_clear(); return; }
+  if (persist_write_chunks(RK_CHUNK0, rle, len)) {
+    persist_write_int(RK_LEN, (int32_t)len);
+  } else {
+    radar_persist_clear();
+  }
 }
 
 // Expand a persisted half-res mask into a full-res base RLE (ink on transparent).
@@ -286,9 +327,15 @@ static uint8_t *rle_from_mask(const uint8_t *mask, uint8_t ink, uint32_t *out_le
 
 static void persist_timer_cb(void *ctx) {
   s_persist_timer = NULL;
-  if (!s_base_dirty) return;
-  persist_base();
-  s_base_dirty = false;
+  if (s_base_dirty) { persist_base(); s_base_dirty = false; }
+  if (s_radar_dirty) { persist_radar(); s_radar_dirty = false; }
+}
+
+static void schedule_persist(void) {
+  // Persist shortly, off the AppMessage handler (synchronous flash writes here
+  // stalled the app). The unload path is the backstop if we exit before this.
+  if (s_persist_timer) app_timer_cancel(s_persist_timer);
+  s_persist_timer = app_timer_register(PERSIST_DELAY_MS, persist_timer_cb, NULL);
 }
 
 void scene_set_base(uint8_t *rle, uint32_t len) {
@@ -301,23 +348,31 @@ void scene_set_base(uint8_t *rle, uint32_t len) {
     if (rle[i + 2] != WSR_TRANSPARENT) { has_ink = true; break; }
   }
   if (!has_ink) { free(rle); return; }
+  // Identical to what we already show (e.g. the phone's relaunch re-push of an
+  // unchanged map): nothing to redraw or rewrite to flash.
+  if (s_base && len == s_base_len && memcmp(rle, s_base, len) == 0) {
+    free(rle);
+    return;
+  }
   if (s_base) free(s_base);
   s_base = rle;
   s_base_len = len;
   s_base_dirty = true;
   if (s_layer) layer_mark_dirty(s_layer);
-  // Persist shortly, off the AppMessage handler (synchronous flash writes here
-  // stalled the app). The unload path is the backstop if we exit before this.
-  if (s_persist_timer) app_timer_cancel(s_persist_timer);
-  s_persist_timer = app_timer_register(PERSIST_DELAY_MS, persist_timer_cb, NULL);
+  schedule_persist();
 }
 
 void scene_begin_batch(uint8_t nframes) {
   if (s_anim_timer) { app_timer_cancel(s_anim_timer); s_anim_timer = NULL; }
   s_animating = false;
-  free_frames();
-  if (nframes > WSR_MAX_FRAMES) nframes = WSR_MAX_FRAMES;
-  // s_frame_count is incremented as frames actually arrive
+  // CRUCIAL: keep the current frames on screen while the new batch streams in.
+  // Freeing them here blanked the radar for the whole transfer (tens of
+  // seconds); instead frames are replaced in place as they arrive and any
+  // leftovers beyond the new batch are trimmed at end_batch.
+  if (s_display_frame >= s_frame_count) {
+    s_display_frame = s_frame_count > 0 ? s_frame_count - 1 : -1;
+  }
+  s_incoming_max = 0;
   (void)nframes;
 }
 
@@ -327,9 +382,22 @@ void scene_set_frame(uint8_t idx, uint8_t *rle, uint32_t len) {
   s_frames[idx] = rle;
   s_frame_len[idx] = len;
   if (idx + 1 > s_frame_count) s_frame_count = idx + 1;
+  if (idx + 1 > s_incoming_max) s_incoming_max = idx + 1;
 }
 
 void scene_end_batch(void) {
+  // Trim stale frames beyond what this batch actually delivered — but if the
+  // batch delivered nothing, keep everything (never trade frames for nothing).
+  if (s_incoming_max > 0) {
+    for (int i = s_incoming_max; i < WSR_MAX_FRAMES; i++) {
+      if (s_frames[i]) { free(s_frames[i]); s_frames[i] = NULL; }
+      s_frame_len[i] = 0;
+    }
+    s_frame_count = s_incoming_max;
+    s_radar_dirty = true;
+    schedule_persist();
+  }
+  s_incoming_max = 0;
   s_display_frame = s_frame_count > 0 ? s_frame_count - 1 : -1;  // newest
   if (s_layer) layer_mark_dirty(s_layer);
 }
@@ -374,16 +442,28 @@ Layer *scene_create_layer(GRect frame) {
     }
   }
 
+  // Restore the cached newest radar frame too, so the last scan is on screen
+  // from the very first draw — even before (or without) the phone.
+  uint32_t rlen = 0;
+  uint8_t *radar = persist_read_chunks(RK_LEN, RK_CHUNK0, RK_MAX, &rlen);
+  if (radar) {
+    s_frames[0] = radar;
+    s_frame_len[0] = rlen;
+    s_frame_count = 1;
+    s_display_frame = 0;
+  }
+
   layer_set_update_proc(s_layer, scene_update);
   return s_layer;
 }
 
 void scene_destroy(void) {
   if (s_persist_timer) { app_timer_cancel(s_persist_timer); s_persist_timer = NULL; }
-  // Guarantee the latest map is cached before we exit, so the next launch
-  // redraws it instantly instead of showing a blank screen. (Safe here: this
-  // is the unload path, not the AppMessage handler.)
+  // Guarantee the latest map + radar are cached before we exit, so the next
+  // launch redraws them instantly instead of showing a blank screen. (Safe
+  // here: this is the unload path, not the AppMessage handler.)
   if (s_base_dirty) { persist_base(); s_base_dirty = false; }
+  if (s_radar_dirty) { persist_radar(); s_radar_dirty = false; }
   if (s_anim_timer) { app_timer_cancel(s_anim_timer); s_anim_timer = NULL; }
   free_frames();
   if (s_base) { free(s_base); s_base = NULL; }

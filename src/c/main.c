@@ -25,6 +25,20 @@ static char s_scan_buf[40];     // persistent bottom text (scan time + range)
 static char s_status_buf[40];   // transient status overriding scan text
 static bool s_status_active;
 
+// The scan label is persisted (key 2; keys 199+ belong to scene.c, 1 to
+// settings) so the restored cached radar shows its true scan time on reload.
+// The flash write is deferred off the AppMessage handler, like scene.c's.
+#define PERSIST_KEY_SCAN 2
+static AppTimer *s_scan_persist_timer;
+static bool s_scan_dirty;
+
+static void scan_persist_cb(void *ctx) {
+  s_scan_persist_timer = NULL;
+  if (!s_scan_dirty) return;
+  persist_write_string(PERSIST_KEY_SCAN, s_scan_buf);
+  s_scan_dirty = false;
+}
+
 // Battery icon geometry, shared between the header paint and battery layout.
 #define BATT_ICON_W 22
 #define BATT_ICON_H 11
@@ -57,6 +71,9 @@ void app_set_scan_label(const char *text) {
   s_scan_buf[sizeof(s_scan_buf) - 1] = '\0';
   s_mins_since_refresh = 0;  // a fresh pull just landed
   refresh_bottom_text();
+  s_scan_dirty = true;
+  if (s_scan_persist_timer) app_timer_cancel(s_scan_persist_timer);
+  s_scan_persist_timer = app_timer_register(3000, scan_persist_cb, NULL);
 }
 
 void app_set_weather(const char *now, const char *hilo, const char *pop) {
@@ -220,7 +237,15 @@ static void window_load(Window *window) {
   text_layer_set_font(s_bottom_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
   layer_add_child(root, text_layer_get_layer(s_bottom_layer));
 
-  app_set_status("Locating...");
+  // Restore the last scan label so the cached map + radar (restored by the
+  // scene from flash) carry their true timestamp. Only show "Locating..." on a
+  // truly cold start with nothing cached — never over a restored scene.
+  if (persist_exists(PERSIST_KEY_SCAN)) {
+    persist_read_string(PERSIST_KEY_SCAN, s_scan_buf, sizeof(s_scan_buf));
+    refresh_bottom_text();
+  } else {
+    app_set_status("Locating...");
+  }
   scene_set_invert(settings_get()->invert);
 
   // Seed the UI with the current time and battery state.
@@ -230,6 +255,8 @@ static void window_load(Window *window) {
 }
 
 static void window_unload(Window *window) {
+  if (s_scan_persist_timer) { app_timer_cancel(s_scan_persist_timer); s_scan_persist_timer = NULL; }
+  if (s_scan_dirty) { persist_write_string(PERSIST_KEY_SCAN, s_scan_buf); s_scan_dirty = false; }
   text_layer_destroy(s_time_layer);
   text_layer_destroy(s_date_layer);
   text_layer_destroy(s_batt_layer);
