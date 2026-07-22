@@ -406,15 +406,19 @@ function refreshFetch(c) {
     fetchWeather(loc, c);  // fire-and-forget; updates the header when it lands
 
     fetchRadarIndex(function (err2, idx) {
-      if (err2 || !idx || !idx.radar || !idx.radar.past ||
-          idx.radar.past.length === 0) {
-        finish('No radar data');
-        return;
+      // Decoupled: a radar-index failure (RainViewer unreachable) must NOT stop
+      // the map from loading. Fall through with no frames — runRefresh then just
+      // builds/sends the map.
+      var host = null, frames = [];
+      if (!err2 && idx && idx.radar && idx.radar.past && idx.radar.past.length) {
+        host = idx.host;
+        var past = idx.radar.past;
+        var n = Math.min(c.frames, past.length);
+        frames = past.slice(past.length - n);   // oldest .. newest
+      } else {
+        sendStatus('No radar — loading map');
       }
-      var past = idx.radar.past;
-      var n = Math.min(c.frames, past.length);
-      var frames = past.slice(past.length - n);   // oldest .. newest
-      runRefresh(c, loc, idx.host, frames);
+      runRefresh(c, loc, host, frames);
     });
   });
 }
@@ -520,6 +524,14 @@ function runRefresh(c, loc, host, frames) {
           transport.sendImage(IMG_KIND_RADAR, item.i, rle, function () { next(null); });
         });
     }, whenDone);
+  }
+
+  // No radar this cycle (RainViewer down) — skip the batch entirely and just
+  // handle the map so a radar outage can't leave the screen mapless.
+  if (nframes === 0) {
+    radarDone = true;
+    maybeSendBase();
+    return;
   }
 
   transport.sendDict({ BATCH: 1, NFRAMES: nframes }, function (e) {
