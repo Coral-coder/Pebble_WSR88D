@@ -106,6 +106,13 @@ static AppTimer *s_persist_timer;
 static bool s_base_dirty;        // base changed but not yet written to flash
 static bool s_radar_dirty;       // newest radar changed but not yet written
 static uint8_t s_incoming_max;   // frames received in the current batch
+// While a batch streams in (tens of seconds), the incoming frames arrive
+// oldest-first into the same slots, so drawing a streaming slot would show an
+// out-of-order/older frame. Freeze a copy of the last-known displayed frame and
+// draw THAT for the whole transfer, swapping to the fresh newest at end_batch.
+static uint8_t *s_hold;
+static uint32_t s_hold_len;
+static bool s_batch_active;
 
 // --- framebuffer pixel helpers -------------------------------------------
 
@@ -182,8 +189,12 @@ static void scene_update(Layer *layer, GContext *ctx) {
   bool one_bit = gbitmap_get_format(fb) == GBitmapFormat1Bit;
 
   apply_rle(fb, s_base, s_base_len, one_bit);
-  if (s_frame_count > 0 && s_display_frame >= 0 &&
-      s_display_frame < s_frame_count) {
+  // During a streaming batch, draw the frozen last-known frame; otherwise draw
+  // the selected slot (the newest, or the animation cursor).
+  if (s_batch_active && s_hold) {
+    apply_rle(fb, s_hold, s_hold_len, one_bit);
+  } else if (s_frame_count > 0 && s_display_frame >= 0 &&
+             s_display_frame < s_frame_count) {
     apply_rle(fb, s_frames[s_display_frame], s_frame_len[s_display_frame],
               one_bit);
   }
@@ -237,6 +248,9 @@ static void free_frames(void) {
 // the compact half-res 1-bit ink mask. Either way the map is never lost.
 static void persist_base(void) {
   if (!s_base || !s_base_len) return;
+  // Drop any prior map (incl. stale higher chunk keys from a longer write) so
+  // this write starts from a clean slate and the map gets the full budget.
+  persist_clear();
 
   // 1) Lossless: store the base RLE verbatim if it fits (and actually wrote).
   if (s_base_len <= PK_DATA_MAX &&
@@ -282,14 +296,31 @@ static void persist_base(void) {
 // keyspace AND the persist budget has room after the map. A failed write just
 // clears the radar cache — the phone re-pushes the frame on launch regardless.
 static void persist_radar(void) {
-  if (s_frame_count == 0) { radar_persist_clear(); return; }
+  radar_persist_clear();   // fresh start (drops stale higher chunks)
+  if (s_frame_count == 0) return;
   uint8_t *rle = s_frames[s_frame_count - 1];
   uint32_t len = s_frame_len[s_frame_count - 1];
-  if (!rle || len == 0 || len > RK_MAX) { radar_persist_clear(); return; }
+  if (!rle || len == 0 || len > RK_MAX) return;   // already cleared
   if (persist_write_chunks(RK_CHUNK0, rle, len)) {
     persist_write_int(RK_LEN, (int32_t)len);
   } else {
+    radar_persist_clear();   // partial write — don't leave a truncated frame
+  }
+}
+
+// Flush dirty caches to flash, MAP FIRST with the full budget: clear the radar
+// cache so the (more important, harder-to-refetch) map isn't starved, write the
+// map, then re-store the radar in whatever budget remains.
+static void flush_persist(void) {
+  if (s_base_dirty) {
     radar_persist_clear();
+    persist_base();
+    s_base_dirty = false;
+    s_radar_dirty = true;    // must re-store radar after the map rewrite
+  }
+  if (s_radar_dirty) {
+    persist_radar();
+    s_radar_dirty = false;
   }
 }
 
@@ -327,8 +358,7 @@ static uint8_t *rle_from_mask(const uint8_t *mask, uint8_t ink, uint32_t *out_le
 
 static void persist_timer_cb(void *ctx) {
   s_persist_timer = NULL;
-  if (s_base_dirty) { persist_base(); s_base_dirty = false; }
-  if (s_radar_dirty) { persist_radar(); s_radar_dirty = false; }
+  flush_persist();
 }
 
 static void schedule_persist(void) {
@@ -365,13 +395,18 @@ void scene_set_base(uint8_t *rle, uint32_t len) {
 void scene_begin_batch(uint8_t nframes) {
   if (s_anim_timer) { app_timer_cancel(s_anim_timer); s_anim_timer = NULL; }
   s_animating = false;
-  // CRUCIAL: keep the current frames on screen while the new batch streams in.
-  // Freeing them here blanked the radar for the whole transfer (tens of
-  // seconds); instead frames are replaced in place as they arrive and any
-  // leftovers beyond the new batch are trimmed at end_batch.
-  if (s_display_frame >= s_frame_count) {
-    s_display_frame = s_frame_count > 0 ? s_frame_count - 1 : -1;
+  // Freeze a copy of the currently-displayed frame so the radar stays on screen
+  // (and doesn't regress to an out-of-order streaming slot) for the whole
+  // transfer. The incoming frames replace the slots in place; leftovers beyond
+  // the new batch are trimmed at end_batch.
+  if (s_hold) { free(s_hold); s_hold = NULL; s_hold_len = 0; }
+  if (s_frame_count > 0 && s_display_frame >= 0 &&
+      s_display_frame < s_frame_count && s_frames[s_display_frame]) {
+    uint32_t L = s_frame_len[s_display_frame];
+    s_hold = malloc(L);
+    if (s_hold) { memcpy(s_hold, s_frames[s_display_frame], L); s_hold_len = L; }
   }
+  s_batch_active = true;
   s_incoming_max = 0;
   (void)nframes;
 }
@@ -398,6 +433,9 @@ void scene_end_batch(void) {
     schedule_persist();
   }
   s_incoming_max = 0;
+  // Release the freeze and show the fresh newest frame.
+  s_batch_active = false;
+  if (s_hold) { free(s_hold); s_hold = NULL; s_hold_len = 0; }
   s_display_frame = s_frame_count > 0 ? s_frame_count - 1 : -1;  // newest
   if (s_layer) layer_mark_dirty(s_layer);
 }
@@ -462,9 +500,9 @@ void scene_destroy(void) {
   // Guarantee the latest map + radar are cached before we exit, so the next
   // launch redraws them instantly instead of showing a blank screen. (Safe
   // here: this is the unload path, not the AppMessage handler.)
-  if (s_base_dirty) { persist_base(); s_base_dirty = false; }
-  if (s_radar_dirty) { persist_radar(); s_radar_dirty = false; }
+  flush_persist();
   if (s_anim_timer) { app_timer_cancel(s_anim_timer); s_anim_timer = NULL; }
+  if (s_hold) { free(s_hold); s_hold = NULL; s_hold_len = 0; }
   free_frames();
   if (s_base) { free(s_base); s_base = NULL; }
   if (s_layer) { layer_destroy(s_layer); s_layer = NULL; }

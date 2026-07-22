@@ -67,6 +67,7 @@ var pending = false;
 // the view params change or the user moves >10% of the map width.
 var lastBase = null;             // { lat, lon, zoom, detail, style, w, h, url }
 var lastBaseRLE = null;          // the full-res map RLE, cached on the phone
+var restoreDims = null;          // { w, h } the cached RLE was rendered for
 var lastRadar = null;            // { rle, scan } — newest radar frame + label
 // Set on a watch/phone (re)launch: immediately push the cached full-res map +
 // last radar scan so the watch shows the last known state within a second,
@@ -102,8 +103,19 @@ function loadBase() {
     if (s && s.meta) {
       lastBase = s.meta;
       lastBaseRLE = (s.rle && s.rle.length) ? s.rle : null;
+      restoreDims = { w: s.meta.w, h: s.meta.h };
+      return;
     }
-  } catch (e) { lastBase = null; lastBaseRLE = null; }
+    // No current-format cache: fall back to the pre-grayscale cache as a
+    // DISPLAY-ONLY map so the watch shows the last map instead of nothing.
+    // Leave lastBase null so needBase stays true and a fresh grayscale map is
+    // still fetched to replace it.
+    var old = JSON.parse(localStorage.getItem('wsr_base'));
+    if (old && old.meta && old.rle && old.rle.length) {
+      lastBaseRLE = old.rle;
+      restoreDims = { w: old.meta.w, h: old.meta.h };
+    }
+  } catch (e) { lastBase = null; lastBaseRLE = null; restoreDims = null; }
 }
 
 // Same for the newest radar frame: keep it (with its scan label) so a relaunch
@@ -127,8 +139,8 @@ function loadRadar() {
 // label — honest about its age). Runs before the network fetch so the watch is
 // never blank while we wait on GPS/RainViewer/Overpass.
 function pushCachedScene(done) {
-  var haveBase = lastBaseRLE && lastBase &&
-                 lastBase.w === dims.w && lastBase.h === dims.h;
+  var haveBase = lastBaseRLE && restoreDims &&
+                 restoreDims.w === dims.w && restoreDims.h === dims.h;
   // Radar is restored only alongside a dims-matched base — a frame cached for
   // different pixel dims would paint misaligned garbage.
   var haveRadar = haveBase && lastRadar && lastRadar.rle;
@@ -411,6 +423,7 @@ function runRefresh(c, loc, host, frames) {
     lastBase = { lat: loc.lat, lon: loc.lon, zoom: zMap, detail: c.detail,
                  style: c.style, w: W, h: H, url: plan.url };
     lastBaseRLE = pv.base;
+    restoreDims = { w: W, h: H };
     saveBase(rle);                       // cache the full-res map on the phone
     transport.sendImage(IMG_KIND_BASE, 0, rle, function () { done(true); });
   }
