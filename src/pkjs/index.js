@@ -330,14 +330,35 @@ function fetchWeather(loc, c) {
 function sendStatus(text) { transport.sendDict({ STATUS: text }, function () {}); }
 function sendErr(text) { transport.sendDict({ ERR: text }, function () {}); }
 
+function saveLoc(loc) {
+  try { localStorage.setItem('wsr_loc', JSON.stringify(loc)); } catch (e) {}
+}
+function loadLoc() {
+  try {
+    var l = JSON.parse(localStorage.getItem('wsr_loc'));
+    if (l && isFinite(l.lat) && isFinite(l.lon)) return l;
+  } catch (e) {}
+  return null;
+}
+
 function getLocation(c, cb) {
   if (c.locMode === 1 && isFinite(c.lat) && isFinite(c.lon)) {
     cb(null, { lat: c.lat, lon: c.lon });
     return;
   }
   navigator.geolocation.getCurrentPosition(
-    function (pos) { cb(null, { lat: pos.coords.latitude, lon: pos.coords.longitude }); },
-    function (err) { cb(err || new Error('location')); },
+    function (pos) {
+      var loc = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      saveLoc(loc);                     // remember for GPS-failure fallback
+      cb(null, loc);
+    },
+    function (err) {
+      // GPS unavailable/denied/slow must not block everything: fall back to the
+      // last known location so the map + radar still load.
+      var last = loadLoc();
+      if (last) { sendStatus('Using last location'); cb(null, last); }
+      else cb(err || new Error('location'));
+    },
     { timeout: 15000, maximumAge: 600000, enableHighAccuracy: false });
 }
 
