@@ -1,0 +1,75 @@
+name: Build Pebble app
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed to publish releases
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stamp build number into the app
+        run: echo "module.exports = ${{ github.run_number }};" > src/pkjs/build_number.js
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install emulator runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl1.2debian libfdt1 libpixman-1-0 || true
+
+      - name: Install pebble-tool
+        run: pip install --upgrade pebble-tool
+
+      - name: Disable SDK analytics prompt
+        run: |
+          mkdir -p "$HOME/.pebble-sdk"
+          touch "$HOME/.pebble-sdk/NO_TRACKING"
+
+      - name: Install Pebble SDK (toolchain + platforms)
+        run: pebble sdk install latest
+
+      - name: Build .pbw
+        run: pebble build
+
+      - name: Show build artifacts
+        run: ls -la build/
+
+      - name: Upload .pbw
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsr88d-radar
+          path: build/*.pbw
+          if-no-files-found: error
+
+      # Publish a GitHub Release (marked "latest") with the .pbw on every push,
+      # so the app can detect it and offer a one-tap install.
+      - name: Publish release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: b${{ github.run_number }}
+          name: Build ${{ github.run_number }}
+          make_latest: true
+          files: build/*.pbw
+          body: |
+            Automated build ${{ github.run_number }} (commit ${{ github.sha }}).
+            Install the attached `.pbw` via the Pebble app (Dev Connect, or open
+            the file). The watchface also offers a one-tap install from its
+            settings page when a newer build is available.
