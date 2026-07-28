@@ -17,7 +17,7 @@ var OVERPASS_MIRRORS = [
   'https://lz4.overpass-api.de/api/interpreter?data=',
   'https://overpass.openstreetmap.fr/api/interpreter?data='
 ];
-var OVERPASS_TIMEOUT = 10000;   // per-mirror; several mirrors tried in turn
+var OVERPASS_TIMEOUT = 16000;   // per-mirror; must exceed the query's own budget
 var TILE = 256;
 
 function lonToX(lon, z) { return (lon + 180) / 360 * Math.pow(2, z) * TILE; }
@@ -125,11 +125,18 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
   var north = yToLat(tly, z), south = yToLat(tly + H, z);
   var bb = south + ',' + west + ',' + north + ',' + east;
 
+  // Cap road detail by zoom so a WIDE view doesn't ask Overpass for every
+  // residential street across hundreds of miles (a huge, slow, throttled query
+  // that times out). At wide zoom only the major roads are legible anyway.
+  var zoomCap = z <= 5 ? 1 : (z === 6 ? 2 : (z === 7 ? 3 : 5));
+  var eff = Math.min(detail, zoomCap);
+
   // Major roads + coastline + water (ways AND multipolygon relations — big
   // lagoons/rivers are often relations). Small ponds are filtered by size at
-  // render time so only real bodies of water show.
-  var q = '[out:json][timeout:25];(' +
-    'way["highway"~"^(' + highwayRegex(detail) + ')$"](' + bb + ');' +
+  // render time so only real bodies of water show. A tighter server-side
+  // timeout makes a busy instance fail fast so we move to the next mirror.
+  var q = '[out:json][timeout:15];(' +
+    'way["highway"~"^(' + highwayRegex(eff) + ')$"](' + bb + ');' +
     'way["natural"="coastline"](' + bb + ');' +
     'way["natural"="water"](' + bb + ');' +
     'relation["natural"="water"](' + bb + ');' +
@@ -153,7 +160,7 @@ function buildRoadsRLE(lat, lon, z, W, H, ink, detail, cb) {
     var buf = new Uint8Array(W * H);  // 0 = transparent
     var e, n, g, tags, pts;
     // Pass 1: fill water bodies (ways + relation outers) above the threshold.
-    var polys = waterPolys(els, waterMinNodes(detail));
+    var polys = waterPolys(els, waterMinNodes(eff));
     for (e = 0; e < polys.length; e++) {
       g = polys[e]; pts = [];
       for (n = 0; n < g.length; n++) {
