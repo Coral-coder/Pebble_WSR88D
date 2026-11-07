@@ -56,6 +56,8 @@ var IMG_KIND_RADAR = 1;
 
 var RADAR_INDEX_URL = 'https://api.rainviewer.com/public/weather-maps.json';
 var WX_URL = 'https://api.open-meteo.com/v1/forecast';
+// Reliable keyless CDN basemap, used when Overpass roads can't be reached.
+var CARTO_TILES = 'https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png';
 var RADAR_ALPHA_MIN = 40;
 var RADAR_MAX_ZOOM = 7;          // RainViewer tile cap
 var MAP_BUILD_TIMEOUT = 35000;   // give up waiting on the map (radar still ships)
@@ -455,23 +457,35 @@ function runRefresh(c, loc, host, frames) {
 
   // Fetch the base map (network only — does NOT send). cb(rleUint8 | null);
   // null means "no usable map" and the watch keeps its cached one.
+  function buildRasterRLE(url, mode, cb) {
+    var mapFn = function (tx, ty, zz) {
+      return url.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
+    };
+    tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
+      function (err, view, ok) {
+        cb(ok ? render.mapToRLE(view, W, H, mode) : null);
+      });
+  }
+
   function fetchBaseRLE(cb) {
     if (isVector) {
       sendStatus('Loading map...');
       var ink = c.style === 5 ? 0xFF : 0xC0;
       vector.buildRoadsRLE(loc.lat, loc.lon, zMap, W, H, ink, c.detail,
         function (err, rle) {
-          if (err || !rle) { sendStatus('Roads busy — kept cached map'); cb(null); return; }
+          if (err || !rle) {
+            // Overpass (the free roads API) is unreachable from many phones.
+            // Fall back to reliable CDN basemap tiles (same kind of source as
+            // the radar) rendered as a clean grayscale land/water map, so a map
+            // ALWAYS loads instead of staying blank.
+            sendStatus('Using tile map');
+            buildRasterRLE(CARTO_TILES, c.style === 5 ? 'darkgray' : 'graymap', cb);
+            return;
+          }
           cb(rle);
         });
     } else {
-      var mapFn = function (tx, ty, zz) {
-        return plan.url.replace('{z}', zz).replace('{x}', tx).replace('{y}', ty);
-      };
-      tiles.buildViewport(loc.lat, loc.lon, zMap, zMap, W, H, mapFn,
-        function (err, view, ok) {
-          cb(ok ? render.mapToRLE(view, W, H, plan.mode) : null);
-        });
+      buildRasterRLE(plan.url, plan.mode, cb);
     }
   }
 

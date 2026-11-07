@@ -148,6 +148,10 @@ function mapToRLE(rgba, W, H, mode) {
       colors[p] = lum < HC_CUT ? 0xFF : 0xC0;
     } else if (mode === 'darkgray') {
       colors[p] = toGray(255 - lum);
+    } else if (mode === 'graymap') {
+      // Clean multi-tone grayscale land/water map (no edge-detect, no color):
+      // land white, water/parks gray, coastlines/dark features darker.
+      colors[p] = lum < 120 ? 0xC0 : (lum < 205 ? 0xD5 : (lum < 245 ? 0xEA : 0xFF));
     } else {
       colors[p] = toGColor(rgba[i], rgba[i + 1], rgba[i + 2]);  // color / raw
     }
