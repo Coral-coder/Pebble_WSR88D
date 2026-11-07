@@ -1,0 +1,67 @@
+{
+  "name": "wsr88d-radar",
+  "author": "Coral Coder",
+  "version": "1.0.0",
+  "license": "MIT",
+  "private": true,
+  "keywords": [
+    "pebble-app"
+  ],
+  "dependencies": {
+    "pebble-clay": "^1.0.4"
+  },
+  "pebble": {
+    "displayName": "WSR-88D Radar",
+    "uuid": "43062780-d919-4bfe-b7c4-b2e303c1559c",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery",
+      "basalt",
+      "chalk",
+      "diorite"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "REQUEST",
+      "SCR_W",
+      "SCR_H",
+      "SET_UPDATE_MIN",
+      "SET_ANIMATE",
+      "SET_FRAMES",
+      "SET_UNITS",
+      "SET_RANGE",
+      "SET_SCHEME",
+      "BATCH",
+      "NFRAMES",
+      "STATUS",
+      "IMG_KIND",
+      "IMG_FRAME",
+      "IMG_SEQ",
+      "IMG_NCHUNKS",
+      "IMG_TOTAL",
+      "IMG_DATA",
+      "ERR",
+      "WX_NOW",
+      "WX_HILO",
+      "WX_POP",
+      "SET_INVERT"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "IMAGE_MENU_ICON",
+          "file": "images/icon.png",
+          "menuIcon": true
+        }
+      ]
+    },
+    "capabilities": [
+      "location",
+      "configurable"
+    ]
+  }
+}

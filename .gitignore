@@ -1,0 +1,12 @@
+# Pebble build output
+build/
+*.pbw
+
+# Node / SDK
+node_modules/
+.pebble-cache/
+.lock-waf*
+
+# Editor / OS
+.DS_Store
+*.swp
