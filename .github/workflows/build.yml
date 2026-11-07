@@ -34,8 +34,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libsdl1.2debian libfdt1 libpixman-1-0 || true
 
-      - name: Install pebble-tool
-        run: pip install --upgrade pebble-tool
+      - name: Install pebble-tool (+ uv, which it now needs for the SDK venv)
+        run: pip install --upgrade pebble-tool uv
 
       - name: Disable SDK analytics prompt
         run: |
